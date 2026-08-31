@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>3D 뷰어</title>
+<style>
+  body { margin:0; background:#14151a; color:#e8eaf0; font:13px system-ui; overflow:hidden; }
+  #info { position:fixed; top:10px; left:12px; background:rgba(0,0,0,.5); padding:6px 12px; border-radius:6px; }
+  #b-info { position:fixed; right:12px; bottom:12px; background:rgba(0,0,0,.6); color:#e8eaf0; border:1px solid #3a3d48; border-radius:99px; width:26px; height:26px; cursor:pointer; font-size:14px; line-height:1; }
+  #b-info:hover, #b-info.on { background:#5b8def; border-color:#5b8def; }
+  #detail { position:fixed; right:12px; bottom:46px; background:rgba(10,11,14,.92); border:1px solid #3a3d48; border-radius:8px; padding:10px 14px; font-size:12px; line-height:1.7; max-width:min(340px, 90vw); white-space:pre-line; }
+  #bar { position:fixed; top:10px; right:12px; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; max-width:70vw; }
+  #bar button { background:rgba(0,0,0,.55); color:#e8eaf0; border:1px solid #3a3d48; border-radius:6px; padding:5px 12px; cursor:pointer; font:12px system-ui; }
+  #bar button:hover { background:rgba(0,0,0,.8); }
+  #bar button.on { background:#5b8def; border-color:#5b8def; color:#fff; }
+  @media (max-width: 480px) { /* 카드 내장 소형 뷰어 */
+    #bar button { padding:2px 6px; font-size:10px; }
+    #info { font-size:10px; padding:3px 8px; max-width:55vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="info"><span id="infotext">로딩…</span></div>
+<button id="b-info" title="상세 정보" hidden>ⓘ</button>
+<div id="detail" hidden></div>
+<div id="bar">
+  <button id="b-full" class="on" title="텍스처 포함 (1)">풀 쉐이딩</button>
+  <button id="b-clay" title="텍스처 없이 형태만 (2)">클레이</button>
+  <button id="b-wire" title="와이어프레임 오버레이 (W)">와이어</button>
+  <button id="b-grid" title="바닥 그리드 (G)">그리드</button>
+  <button id="b-light" title="3점 조명: 썬/림/앰비언트 (L)">조명</button>
+  <button id="b-reset" title="카메라 초기화 (R)">뷰 리셋</button>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const q = new URLSearchParams(location.search);
+const v = q.get('v') ?? ''; // 캐시 버스트 (재생성 시각)
+const glbBase = `/files/${q.get('glb') ?? ''}`;
+const glbUrl = v ? `${glbBase}?v=${v}` : glbBase;
+const taskUrl = glbBase.replace(/model\.glb$/, 'task.json') + (v ? `?v=${v}` : '');
+const label = decodeURIComponent(q.get('glb') ?? '').split('/')[1] ?? '';
+document.title = `${label} — 3D 뷰어`;
+const info = document.getElementById('infotext');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1e2028);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment()).texture;
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.01, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+// 표시 모드: 풀 쉐이딩 / 클레이(무텍스처) / 와이어프레임 오버레이 / 그리드 / 뷰 리셋
+const originals = new Map();
+const wires = [];
+const clayMat = new THREE.MeshStandardMaterial({ color: 0xb0b4bc, roughness: 0.85, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+const wireMat = new THREE.MeshBasicMaterial({ wireframe: true, color: 0x35c8ff, transparent: true, opacity: 0.35, depthWrite: false });
+let grid = null;
+let home = null;
+
+// 3점 조명 리그: 썬(키) + 림 + 앰비언트. 켜면 환경광을 낮춰 라이팅이 드러나게.
+const lightRig = new THREE.Group();
+lightRig.visible = false;
+scene.add(lightRig);
+function setLights(on) {
+  lightRig.visible = on;
+  scene.environmentIntensity = on ? 0.25 : 1;
+  document.getElementById('b-light').classList.toggle('on', on);
+}
+
+function setClay(on) {
+  for (const [mesh, mat] of originals) mesh.material = on ? clayMat : mat;
+  document.getElementById('b-full').classList.toggle('on', !on);
+  document.getElementById('b-clay').classList.toggle('on', on);
+}
+function setWire(on) {
+  wires.forEach((w) => { w.visible = on; });
+  document.getElementById('b-wire').classList.toggle('on', on);
+}
+function setGrid(on) {
+  if (grid) grid.visible = on;
+  document.getElementById('b-grid').classList.toggle('on', on);
+}
+function resetView() {
+  if (!home) return;
+  camera.position.copy(home.pos);
+  controls.target.copy(home.target);
+}
+// 버튼과 단축키가 같은 동작 테이블을 공유
+const ACTIONS = [
+  ['b-full', '1', () => setClay(false)],
+  ['b-clay', '2', () => setClay(true)],
+  ['b-wire', 'w', () => setWire(!wires[0]?.visible)],
+  ['b-grid', 'g', () => setGrid(grid && !grid.visible)],
+  ['b-light', 'l', () => setLights(!lightRig.visible)],
+  ['b-reset', 'r', resetView],
+];
+for (const [bid, , fn] of ACTIONS) document.getElementById(bid).onclick = fn;
+addEventListener('keydown', (e) => {
+  const a = ACTIONS.find(([, k]) => k === e.key.toLowerCase());
+  if (a) a[2]();
+});
+// 대시보드 내장(iframe) 상태면 독립 뷰어로 확대하는 버튼 표시
+if (window.self !== window.top) {
+  const b = document.createElement('button');
+  b.textContent = '⛶';
+  b.title = '독립 뷰어 페이지로 크게 보기';
+  b.onclick = () => window.open(location.href, '_blank');
+  document.getElementById('bar').appendChild(b);
+  // 소형 내장 뷰어에서는 ⛶만 표시 (모드 전환은 독립 뷰어에서)
+  if (innerWidth < 480) {
+    for (const btn of document.querySelectorAll('#bar button')) if (btn !== b) btn.style.display = 'none';
+  }
+}
+
+new GLTFLoader().load(glbUrl, async (g) => {
+  scene.add(g.scene);
+  const box = new THREE.Box3().setFromObject(g.scene);
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3()).length();
+  controls.target.copy(c);
+  camera.position.set(c.x + size * 0.6, c.y + size * 0.3, c.z + size * 0.6);
+  camera.near = size / 100; camera.far = size * 10;
+  camera.updateProjectionMatrix();
+  home = { pos: camera.position.clone(), target: controls.target.clone() };
+  let tris = 0;
+  const meshes = [];
+  g.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
+  for (const o of meshes) { // traverse 중 자식 추가 금지 (무한 재귀)
+    tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+    originals.set(o, o.material);
+    [].concat(o.material).forEach((m) => { m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; });
+    const w = new THREE.Mesh(o.geometry, wireMat);
+    w.visible = false;
+    o.add(w);
+    wires.push(w);
+  }
+  // 3점 조명 배치 (모델 크기 기준)
+  const sun = new THREE.DirectionalLight(0xfff2df, 3);       // 썬 (키 라이트, 따뜻한 톤)
+  sun.position.set(c.x + size, c.y + size, c.z + size * 0.6);
+  const rim = new THREE.DirectionalLight(0x9db8ff, 4);       // 림 라이트 (뒤에서 차가운 톤)
+  rim.position.set(c.x - size * 0.7, c.y + size * 0.5, c.z - size);
+  const amb = new THREE.AmbientLight(0xffffff, 0.35);        // 앰비언트
+  sun.target.position.copy(c);
+  rim.target.position.copy(c);
+  lightRig.add(sun, sun.target, rim, rim.target, amb);
+
+  grid = new THREE.GridHelper(size * 1.5, 20, 0x3a3d48, 0x2a2c34);
+  grid.position.y = box.min.y;
+  grid.visible = false;
+  scene.add(grid);
+  // 상세 정보: 로드된 GLB에서 실측 (텍스처 해상도 등) + task.json (시각) + 파일 크기
+  let verts = 0;
+  const matSet = new Set();
+  for (const o of meshes) {
+    verts += o.geometry.attributes.position.count;
+    [].concat(originals.get(o)).forEach((m) => matSet.add(m));
+  }
+  const texNames = { map: 'BaseColor', normalMap: 'Normal', metalnessMap: 'Metallic', roughnessMap: 'Roughness', aoMap: 'AO', emissiveMap: 'Emissive' };
+  const seen = new Set();
+  const texLines = [];
+  for (const m of matSet) for (const [k, name] of Object.entries(texNames)) {
+    const t = m[k];
+    if (t && t.image && !seen.has(t.uuid)) { seen.add(t.uuid); texLines.push(`${name} ${t.image.width}×${t.image.height}`); }
+  }
+  let task = null;
+  try { task = await (await fetch(taskUrl)).json(); } catch {}
+  let fileSize = '';
+  try {
+    const len = (await fetch(glbUrl, { method: 'HEAD' })).headers.get('content-length');
+    if (len) fileSize = (len / 1048576).toFixed(1) + ' MB';
+  } catch {}
+  const dt = (ms) => { if (!ms) return '-'; const d = new Date(ms); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+  const elapsed = task?.started_at && task?.finished_at ? ` (소요 ${Math.round((task.finished_at - task.started_at) / 1000)}초)` : '';
+  document.getElementById('detail').textContent = [
+    `생성 완료: ${dt(task?.finished_at)}${elapsed}`,
+    `삼각형: ${Math.round(tris).toLocaleString()} · 정점: ${verts.toLocaleString()}`,
+    `메시: ${meshes.length}개 · 재질: ${matSet.size}개`,
+    `텍스처: ${texLines.length}장${texLines.length ? ' — ' + texLines.join(', ') : ''}`,
+    fileSize ? `파일 크기: ${fileSize}` : '',
+    task?.id ? `Task: ${task.id}` : '',
+  ].filter(Boolean).join('\n');
+  const bi = document.getElementById('b-info');
+  bi.hidden = false;
+  bi.onclick = () => { const d = document.getElementById('detail'); d.hidden = !d.hidden; bi.classList.toggle('on', !d.hidden); };
+  info.textContent = `${label} — ${Math.round(tris).toLocaleString()} triangles${task?.finished_at ? ' · 생성 ' + dt(task.finished_at) : ''}`;
+}, (ev) => {
+  info.textContent = ev.total ? `로딩 ${Math.round(ev.loaded / ev.total * 100)}%` : `로딩 ${Math.round(ev.loaded / 1e6)}MB`;
+}, () => { info.textContent = '로드 실패'; });
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

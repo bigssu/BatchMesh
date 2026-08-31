@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Meshy 시트 검수</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#14151a; --card:#1e2028; --line:#31343f; --fg:#e8eaf0; --dim:#9aa0ae; --ok:#3fb96a; --warn:#e0a53d; --err:#e05d5d; --acc:#5b8def; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, sans-serif; padding:24px; }
+  h1 { font-size:18px; margin:0 0 16px; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:28px; text-align:center; color:var(--dim); cursor:pointer; margin-bottom:20px; }
+  #drop.over { border-color:var(--acc); color:var(--acc); }
+  #drop.busy { cursor:default; border-style:solid; border-color:var(--acc); }
+  .drop-proc { display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--fg); }
+  .drop-proc .bar { width:300px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+  .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+  .head b { font-size:15px; }
+  .badge { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--dim); }
+  .badge.review { color:var(--warn); border-color:var(--warn); }
+  .badge.approved { color:var(--ok); border-color:var(--ok); }
+  .badge.error { color:var(--err); border-color:var(--err); }
+  .badge.done { background:var(--ok); color:#08130c; border-color:var(--ok); }
+  .imgs { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; }
+  .imgs figure { margin:0; text-align:center; }
+  .imgs img { max-height:180px; max-width:220px; border-radius:6px; background:#fff; display:block; }
+  .imgs figcaption { font-size:12px; color:var(--dim); margin-top:4px; }
+  .sheet-thumb img { max-height:180px; opacity:.75; }
+  .btns { display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap; }
+  button { background:var(--line); color:var(--fg); border:0; border-radius:6px; padding:6px 14px; cursor:pointer; font:inherit; }
+  button:hover { filter:brightness(1.2); }
+  button.ok { background:var(--ok); color:#08130c; }
+  button.danger { background:var(--err); color:#fff; }
+  button.acc { background:var(--acc); color:#fff; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.x { padding:0 6px; font-size:11px; background:transparent; border:1px solid var(--line); color:var(--dim); }
+  button.x:hover { color:var(--err); border-color:var(--err); filter:none; }
+  details#opts { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:16px; }
+  details#opts summary { cursor:pointer; font-weight:600; }
+  .optgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:10px 20px; margin-top:12px; }
+  .optgrid label { display:flex; align-items:center; gap:8px; }
+  .optgrid label.wide { grid-column:span 2; }
+  .optgrid input[type=range] { flex:1; accent-color:var(--acc); }
+  .optgrid select { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:4px 8px; font:inherit; }
+  .mini3d { width:340px; height:240px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#1e2028; }
+  .mini3d iframe { width:100%; height:100%; border:0; display:block; }
+  .gentime { font-size:11px; color:var(--dim); margin-top:2px; }
+  .proc { width:340px; height:240px; border:1px dashed var(--line); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:var(--dim); background:var(--bg); font-size:13px; }
+  .proc .bar, .drop-proc .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .proc .bar { width:70%; }
+  .proc .fill, .drop-proc .fill { height:100%; background:var(--acc); width:0%; transition:width .6s; }
+  .proc .bar.indet .fill, .drop-proc .bar.indet .fill { width:40%; animation:slide 1.2s linear infinite; }
+  .proc.err { border-color:var(--err); border-style:solid; }
+  .proc.err .errtext { color:var(--err); font-size:12px; max-width:88%; text-align:center; word-break:break-all; }
+  @keyframes slide { from { margin-left:-40%; } to { margin-left:100%; } }
+  .extract { margin-top:4px; display:flex; gap:6px; justify-content:center; align-items:center; }
+  .extract input { width:84px; background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:3px 6px; font:inherit; font-size:12px; }
+  .extract button { font-size:12px; padding:4px 10px; }
+  .imgwrap { position:relative; }
+  .ibar { position:absolute; top:6px; left:6px; display:flex; gap:4px; opacity:0; transition:opacity .15s; z-index:2; }
+  .imgwrap:hover .ibar { opacity:1; }
+  .ib { padding:2px 7px; background:rgba(0,0,0,.6); border:0; border-radius:6px; cursor:pointer; font-size:13px; line-height:1.4; }
+  .ib:hover { background:rgba(0,0,0,.85); filter:none; }
+  details#hist { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-top:20px; }
+  details#hist summary { cursor:pointer; font-weight:600; }
+  #histlist .card { margin-top:12px; margin-bottom:0; background:var(--bg); }
+  input[type=text] { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 10px; width:260px; font:inherit; }
+  #runbar { display:flex; gap:12px; align-items:center; margin:18px 0; }
+  #log { background:#0d0e12; border:1px solid var(--line); border-radius:8px; padding:10px; font:12px/1.5 ui-monospace, monospace; white-space:pre-wrap; max-height:220px; overflow-y:auto; display:none; }
+  .err-msg { color:var(--err); font-size:13px; }
+  a { color:var(--acc); }
+</style>
+</head>
+<body>
+<h1>Meshy 캐릭터 시트 검수</h1>
+<div id="drop"><span id="droptext">시트 이미지를 여기에 드래그하거나 클릭해서 선택 (여러 장 가능)</span><input id="file" type="file" accept="image/*" multiple hidden></div>
+<details id="opts" open>
+  <summary>생성 옵션 <span style="color:var(--dim)">(저장하면 다음 생성부터 적용)</span></summary>
+  <div class="optgrid">
+    <label>AI 모델
+      <select data-k="ai_model"><option>latest</option><option>meshy-7</option><option>meshy-6</option></select></label>
+    <label class="wide" style="color:var(--dim)">생성은 항상 <b>하이폴리</b>로 진행 — 로우폴리는 완성된 버전의 "로우폴리 추출"로 뽑습니다 (같은 하이폴리에서 폴리곤 수 바꿔 반복 추출 가능)</label>
+    <label>포맷
+      <input type="checkbox" id="fmt-glb"> GLB
+      <input type="checkbox" id="fmt-fbx"> FBX</label>
+    <label>텍스처 해상도
+      <select data-k="texture_resolution"><option>1k</option><option>2k</option><option>4k</option></select></label>
+    <label><input type="checkbox" data-k="should_texture"> 텍스처 생성</label>
+    <label><input type="checkbox" data-k="enable_pbr"> PBR 맵</label>
+    <label>포즈
+      <select data-k="pose_mode"><option value="a-pose">A-포즈</option><option value="t-pose">T-포즈</option></select></label>
+    <label>대칭
+      <select data-k="symmetry_mode"><option value="auto">자동</option><option value="on">강제</option><option value="off">끔</option></select></label>
+    <label><input type="checkbox" data-k="image_enhancement"> 이미지 보정</label>
+    <label><input type="checkbox" data-k="remove_lighting"> 조명 제거</label>
+    <label><input type="checkbox" data-k="auto_size"> 실측 크기 자동</label>
+    <label><input type="checkbox" data-k="ultra_mode"> Ultra 모드</label>
+    <label class="wide" title="생성을 텍스처 없이(기하만, 크레딧 절약) 진행하고, 형상 검수 후 버전의 '텍스처 입히기'로 텍스처를 붙입니다">
+      <input type="checkbox" id="geo-first"> 기하 먼저 생성 후 검수 (텍스처는 승인 후 별도)</label>
+    <label><button id="saveopts" class="acc">옵션 저장</button> <span id="optstat" style="color:var(--ok)"></span></label>
+  </div>
+</details>
+<div id="runbar">
+  <button id="runbtn" class="acc">승인된 시트 3D 생성 시작</button>
+  <span id="runstat" style="color:var(--dim)"></span>
+</div>
+<div id="log"></div>
+<div id="cards"></div>
+<details id="hist">
+  <summary>히스토리 (<span id="histn">0</span>)</summary>
+  <div id="histlist"></div>
+</details>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const api = async (url, opt) => {
+  const r = await fetch(url, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+};
+const STATUS_KO = { review: '검수 대기', approved: '승인됨', splitting: '분해 중…', error: '오류' };
+
+// 버튼 비활성 + 라벨 교체로 감싼 API 호출 (완료/실패 시 복원)
+async function busyBtn(b, working, fn) {
+  const idle = b.textContent;
+  b.disabled = true;
+  b.textContent = working;
+  try { await fn(); } catch (e) { alert(e.message); }
+  b.disabled = false;
+  b.textContent = idle;
+}
+let busy = new Set();
+
+async function refresh() {
+  const [sheets, st] = await Promise.all([api('/api/sheets'), api('/api/run')]);
+  renderCards(sheets);
+  // 진행률 제자리 갱신 (카드 재렌더 없이)
+  for (const sh of sheets) for (const j of sh.jobs ?? []) {
+    const k = `${sh.id}|${j.src}|${j.polycount}`;
+    const pct = document.querySelector(`[data-jobpct="${CSS.escape(k)}"]`);
+    if (pct) pct.textContent = `${j.progress ?? 0}%`;
+    const bar = document.querySelector(`[data-jobbar="${CSS.escape(k)}"]`);
+    if (bar) bar.style.width = `${j.progress ?? 0}%`;
+  }
+  $('#runbtn').disabled = st.running;
+  $('#runstat').textContent = st.running ? `배치 실행 중 (${st.ids.join(', ')})` : '';
+  const log = $('#log');
+  if (st.lines.length) {
+    log.style.display = 'block';
+    const text = st.lines.join('\n');
+    if (log.textContent !== text) { log.textContent = text; log.scrollTop = log.scrollHeight; }
+  }
+}
+
+// 변경된 카드만 교체 — 전체 재렌더/이미지 재로딩 없음
+function renderCards(sheets) {
+  const cards = $('#cards');
+  const seen = new Set();
+  for (const s of sheets) {
+    seen.add(s.id);
+    // 진행률(progress)은 키에서 제외 — 진행 중 카드 전체가 매번 다시 그려지지 않게 (진행률은 제자리 갱신)
+    const key = JSON.stringify({ ...s, jobs: (s.jobs ?? []).map((j) => `${j.src}|${j.polycount}`) }) + (busy.has(s.id) ? '|busy' : '');
+    const prev = cards.querySelector(`[data-id="${s.id}"]`);
+    if (prev && prev.dataset.key === key) continue;
+    const el = buildCard(s);
+    el.dataset.id = s.id;
+    el.dataset.key = key;
+    if (prev) prev.replaceWith(el); else cards.appendChild(el);
+  }
+  for (const c of [...cards.children]) {
+    if (c.dataset.temp) continue; // 업로드 임시 카드는 refresh가 지우지 않음
+    if (!seen.has(c.dataset.id)) c.remove();
+  }
+  // 서버 정렬(최신 위)과 DOM 순서가 다르면 재배열
+  const want = sheets.map((s) => s.id);
+  const cur = [...cards.children].filter((c) => !c.dataset.temp).map((c) => c.dataset.id);
+  if (JSON.stringify(want) !== JSON.stringify(cur)) {
+    for (const id of want) {
+      const el = cards.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (el) cards.appendChild(el);
+    }
+  }
+}
+
+// 호버 아이콘 바 (📂 폴더 열기 / 📋 경로 복사) — 이미지·소형 뷰어 공용
+const ibarHtml = (rel, what) => `<div class="ibar">
+    <button class="ib" data-open="${rel}" title="${what} 폴더 열기">📂</button>
+    <button class="ib" data-copy="${rel}" title="${what} 경로 복사">📋</button></div>`;
+
+function figHtml(rel, bust, cap, cls = '') {
+  return `<figure class="imgwrap ${cls}">${ibarHtml(rel, '이미지')}
+    <img src="/files/${rel}?${bust}"><figcaption>${cap}</figcaption></figure>`;
+}
+
+// 진행 중 자리표시 카드 — 추출/텍스처(실진행률)·생성·분해 공용
+function procHtml(title, startedMs, opts = {}) {
+  const prog = opts.progress != null;
+  const key = opts.barKey ?? '';
+  return `<figure><div class="proc">
+    <div><b>${title}</b>${prog ? ` <span data-jobpct="${key}">${opts.progress}%</span>` : ''}</div>
+    <div class="bar${prog ? '' : ' indet'}"><div class="fill"${prog ? ` data-jobbar="${key}" style="width:${opts.progress}%"` : ''}></div></div>
+    <div class="gentime"><span data-elapsed="${startedMs}">0:00</span>${opts.detail ? ' · ' + opts.detail : ''}</div>
+  </div></figure>`;
+}
+
+const dtfmt = (ms) => {
+  if (!ms) return '';
+  const d = new Date(ms); const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+// 카드 내 상시 소형 3D 뷰어 (⛶ 클릭 시 독립 뷰어 페이지)
+function mini3dHtml(viewerUrl, modelRel, capHtml) {
+  return `<figure class="imgwrap">${ibarHtml(modelRel, '모델')}
+    <div class="mini3d"><iframe loading="lazy" src="${viewerUrl}"></iframe></div>
+    <figcaption>${capHtml}</figcaption></figure>`;
+}
+
+// 생성 결과(gen) 1건 → 소형 뷰어 + 캡션. actions=true면 삭제/추출 버튼 포함 (메인 카드)
+function genHtml(baseRel, g, idx, actions) {
+  const dl = g.formats.map((f) => `<a href="/files/${baseRel}/model.${f}">${f.toUpperCase()}</a>`).join(' · ');
+  const viewerUrl = `/viewer?glb=${encodeURIComponent(baseRel + '/model.glb')}&v=${g.finished ?? 0}`;
+  const del = actions ? ` · <button class="x" data-gen="${g.name}" data-idx="${idx}">삭제</button>` : '';
+  // 하이폴리 원본만 추출 가능 — 추출본을 다시 깎으면 품질 저하
+  const extract = actions && !g.derived
+    ? `<div class="extract"><input type="number" data-pc="${g.name}" value="12000" min="100" max="300000" step="100" title="추출 폴리곤 수">
+       <button data-remesh="${g.name}" title="이 하이폴리에서 로우폴리 추출 (반복 가능)">로우폴리 추출</button>
+       ${g.geomOnly ? `<button class="acc" data-retex="${g.name}" title="시트 이미지를 가이드로 이 기하에 텍스처 생성 (~10크레딧)">텍스처 입히기</button>` : ''}</div>`
+    : '';
+  const tag = [
+    g.derived && ` <span class="badge">추출본${g.polycount ? ' ' + g.polycount.toLocaleString() + '면' : ''}</span>`,
+    g.geomOnly && ' <span class="badge review">기하만</span>',
+    g.retextured && ' <span class="badge done">텍스처됨</span>',
+  ].filter(Boolean).join('');
+  const el = g.elapsed != null
+    ? ` · 소요 ${g.elapsed >= 60 ? Math.floor(g.elapsed / 60) + '분 ' + (g.elapsed % 60) + '초' : g.elapsed + '초'}`
+    : '';
+  const cap = `<b>#${idx}</b>${tag} · <a href="${viewerUrl}" target="_blank" title="독립 뷰어로 크게 보기">⛶ 크게</a> · ${dl}${del}
+    ${g.finished ? `<div class="gentime">생성 ${dtfmt(g.finished)}${el}</div>` : ''}${extract}`;
+  return g.formats.includes('glb') ? mini3dHtml(viewerUrl, `${baseRel}/model.glb`, cap) : `<figure><figcaption>${cap}</figcaption></figure>`;
+}
+
+function buildCard(s) {
+    const c = document.createElement('div');
+    c.className = 'card';
+    const bust = s.rev;
+    const crops = s.views.map((v) => figHtml(`staging/${s.id}/${v}.png`, bust,
+      `${v} <button class="x" data-upscale="${v}" title="GCP 업스케일로 긴 변 2048px화">2K</button> <button class="x" data-view="${v}" title="이 크롭만 삭제">✕</button>`)).join('');
+    const result = (s.gens ?? []).map((g, i) => genHtml(`output/${s.id}/${g.name}`, g, i + 1, true)).join('');
+    // 진행 중 작업 자리표시 카드: 추출/텍스처(실제 진행률) / 생성·분해(무한 바)
+    const procs = (s.jobs ?? []).map((j) => procHtml(
+      j.kind === 'retexture' ? '텍스처 생성 중…' : '로우폴리 추출 중…', j.started, {
+        progress: j.progress ?? 0,
+        barKey: `${s.id}|${j.src}|${j.polycount}`,
+        detail: `${j.polycount ? j.polycount.toLocaleString() + '면 · ' : ''}원본 ${j.src.replace('gen-', '')}`,
+      })).join('')
+      + (s.generating ? procHtml('3D 생성 중…', s.runStarted ?? Date.now()) : '')
+      + (s.status === 'splitting' ? procHtml('시트 분해 중… (뷰 감지)', s.started ?? Date.now()) : '')
+      + (s.lastError ? `
+      <figure><div class="proc err">
+        <div><b>⚠ 작업 실패</b></div>
+        <div class="errtext">${(s.lastError.message ?? '').replace(/[<>&]/g, '')}</div>
+        <div class="gentime">${dtfmt(s.lastError.ts)}</div>
+        <button data-dismisserr>확인</button>
+      </div></figure>` : '');
+    c.innerHTML = `
+      <div class="head"><b>${s.id}</b>
+        <span class="badge ${s.status}">${STATUS_KO[s.status] ?? s.status}</span>
+        ${s.done ? '<span class="badge done">3D 완료</span>' : ''}
+        ${s.status === 'error' ? `<span class="err-msg">${s.error ?? ''}</span>` : ''}
+      </div>
+      <div class="imgs">
+        ${figHtml(`staging/${s.id}/sheet.png`, bust, '원본 시트', 'sheet-thumb')}
+        ${crops}${result}${procs}
+      </div>
+      <div class="btns">
+        <button class="ok" data-act="approve" ${s.status !== 'review' || busy.has(s.id) ? 'disabled' : ''}>승인</button>
+        ${s.done ? '<button class="acc" data-act="regen">3D 재생성</button><button data-act="archive">히스토리 보관</button>' : ''}
+        <input type="text" placeholder="재생성 힌트 (예: 왼쪽/오른쪽이 바뀜)" data-hint>
+        <button data-act="resplit" ${busy.has(s.id) ? 'disabled' : ''}>재생성</button>
+        <button class="danger" data-act="delete">삭제</button>
+      </div>`;
+    c.querySelectorAll('button[data-act]').forEach((b) => b.onclick = () => act(s.id, b.dataset.act, c));
+    c.querySelectorAll('button[data-upscale]').forEach((b) => b.onclick = () =>
+      busyBtn(b, '…', () => api(`/api/sheets/${s.id}/upscale/${b.dataset.upscale}`, { method: 'POST' })).then(refresh));
+    c.querySelectorAll('button.x[data-view]').forEach((b) => b.onclick = async () => {
+      if (!confirm(`${s.id}의 ${b.dataset.view} 크롭을 삭제할까요?`)) return;
+      try { await api(`/api/sheets/${s.id}/view/${b.dataset.view}`, { method: 'DELETE' }); } catch (e) { alert(e.message); }
+      refresh();
+    });
+    c.querySelectorAll('button.x[data-gen]').forEach((b) => b.onclick = async () => {
+      if (!confirm(`생성 결과 #${b.dataset.idx}을(를) 영구 삭제할까요? 복구할 수 없습니다.`)) return;
+      try { await api(`/api/sheets/${s.id}/gen/${b.dataset.gen}`, { method: 'DELETE' }); } catch (e) { alert(e.message); }
+      refresh();
+    });
+    const de = c.querySelector('[data-dismisserr]');
+    if (de) de.onclick = async () => {
+      try { await api(`/api/sheets/${s.id}/error`, { method: 'DELETE' }); } catch {}
+      refresh();
+    };
+    c.querySelectorAll('button[data-retex]').forEach((b) => b.onclick = () => {
+      if (!confirm('시트 이미지를 가이드로 텍스처를 생성할까요? 크레딧이 소모됩니다.')) return;
+      busyBtn(b, '텍스처 생성 중…', () => api(`/api/sheets/${s.id}/gen/${b.dataset.retex}/texture`, { method: 'POST' }));
+    });
+    c.querySelectorAll('button[data-remesh]').forEach((b) => b.onclick = () => {
+      const pc = Number(c.querySelector(`input[data-pc="${b.dataset.remesh}"]`).value);
+      if (!pc || pc < 100 || pc > 300000) return alert('폴리곤 수는 100~300,000');
+      busyBtn(b, '추출 중…', () => api(`/api/sheets/${s.id}/gen/${b.dataset.remesh}/remesh`, { method: 'POST', body: JSON.stringify({ polycount: pc }) }));
+    });
+    return c;
+}
+
+async function act(id, action, card) {
+  try {
+    if (action === 'delete') {
+      if (!confirm(`${id} 삭제할까요?`)) return;
+      await api(`/api/sheets/${id}`, { method: 'DELETE' });
+    } else if (action === 'approve') {
+      await api(`/api/sheets/${id}/approve`, { method: 'POST' });
+    } else if (action === 'regen') {
+      if (!confirm(`${id}를 현재 옵션으로 다시 생성할까요? 크레딧이 소모됩니다.`)) return;
+      await api('/api/run', { method: 'POST', body: JSON.stringify({ ids: [id], force: true }) });
+    } else if (action === 'archive') {
+      if (!confirm(`${id}를 히스토리로 보관할까요? (삭제되지 않고 history/ 폴더로 이동합니다)`)) return;
+      await api(`/api/sheets/${id}/archive`, { method: 'POST' });
+      loadHistory();
+    } else if (action === 'resplit') {
+      busy.add(id); refresh();
+      const hint = card.querySelector('[data-hint]').value;
+      await api(`/api/sheets/${id}/resplit`, { method: 'POST', body: JSON.stringify({ hint }) });
+    }
+  } catch (e) { alert(e.message); }
+  busy.delete(id);
+  refresh();
+}
+
+async function upload(files) {
+  const dz = $('#droptext');
+  const orig = dz.innerHTML;
+  $('#drop').classList.add('busy');
+  try {
+    let n = 0;
+    for (const f of files) {
+      n++;
+      const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
+      const safeName = f.name.replace(/[<>&"]/g, '');
+      dz.innerHTML = `<div class="drop-proc">
+        <div><b>시트 분해 중…</b> ${safeName}${files.length > 1 ? ` (${n}/${files.length})` : ''}</div>
+        <div class="bar indet"><div class="fill"></div></div>
+        <div class="gentime"><span data-elapsed="${Date.now()}">0:00</span></div></div>`;
+      try { await api('/api/sheets', { method: 'POST', body: JSON.stringify({ name: f.name, dataUrl }) }); }
+      catch (e) { alert(`${f.name}: ${e.message}`); }
+      refresh();
+    }
+  } finally {
+    dz.innerHTML = orig;
+    $('#drop').classList.remove('busy');
+  }
+}
+
+$('#drop').onclick = () => { if (!$('#drop').classList.contains('busy')) $('#file').click(); };
+$('#file').onchange = (e) => upload([...e.target.files]);
+$('#drop').ondragover = (e) => { e.preventDefault(); $('#drop').classList.add('over'); };
+$('#drop').ondragleave = () => $('#drop').classList.remove('over');
+$('#drop').ondrop = (e) => { e.preventDefault(); $('#drop').classList.remove('over'); upload([...e.dataTransfer.files]); };
+$('#runbtn').onclick = async () => { try { await api('/api/run', { method: 'POST' }); } catch (e) { alert(e.message); } refresh(); };
+
+// --- 생성 옵션 패널 --- (생성은 항상 하이폴리, 로우폴리는 버전별 추출)
+async function loadOpts() {
+  const m = await api('/api/config');
+  for (const el of document.querySelectorAll('[data-k]')) {
+    const v = m[el.dataset.k];
+    if (el.type === 'checkbox') el.checked = !!v;
+    else if (v != null) el.value = v;
+  }
+  const aiSel = document.querySelector('[data-k="ai_model"]');
+  if (!aiSel.value) aiSel.value = 'latest';
+  const fmts = m.target_formats ?? ['glb'];
+  $('#fmt-glb').checked = fmts.includes('glb');
+  $('#fmt-fbx').checked = fmts.includes('fbx');
+  $('#geo-first').checked = !!m.geometry_first;
+}
+$('#saveopts').onclick = async () => {
+  const m = {};
+  for (const el of document.querySelectorAll('[data-k]'))
+    m[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value;
+  m.should_remesh = false; // 생성은 항상 하이폴리
+  m.target_polycount = null;
+  m.geometry_first = $('#geo-first').checked;
+  const fmts = [];
+  if ($('#fmt-glb').checked) fmts.push('glb');
+  if ($('#fmt-fbx').checked) fmts.push('fbx');
+  if (!fmts.length) return alert('포맷을 최소 1개 선택하세요 (GLB/FBX)');
+  m.target_formats = fmts;
+  try {
+    await api('/api/config', { method: 'POST', body: JSON.stringify(m) });
+    $('#optstat').textContent = '저장됨 ✓';
+    setTimeout(() => { $('#optstat').textContent = ''; }, 2500);
+  } catch (e) { alert(e.message); }
+};
+
+// --- 히스토리 ---
+async function loadHistory() {
+  const list = await api('/api/history');
+  $('#histn').textContent = list.length;
+  const box = $('#histlist');
+  box.innerHTML = '';
+  for (const h of list) {
+    const row = document.createElement('div');
+    row.className = 'card';
+    const result = (h.gens ?? []).map((g, i) => genHtml(`history/${h.name}/${g.name}`, g, i + 1, false)).join('');
+    row.innerHTML = `
+      <div class="head"><b>${h.id}</b><span class="badge">${h.name.slice(0, 15)}</span>
+        ${(h.gens ?? []).length ? '<span class="badge done">3D</span>' : ''}</div>
+      <div class="imgs">
+        ${h.views.map((v) => figHtml(`history/${h.name}/${v}.png`, 0, v)).join('')}
+        ${result}
+      </div>`;
+    box.appendChild(row);
+  }
+}
+
+// --- 호버 아이콘: 폴더 열기 / 경로 복사 (모든 이미지 공통, 위임 핸들러) ---
+let ROOTPATH = '';
+api('/api/root').then((r) => { ROOTPATH = r.root; });
+document.addEventListener('click', async (e) => {
+  const op = e.target.closest('[data-open]');
+  if (op) {
+    try { await api('/api/reveal', { method: 'POST', body: JSON.stringify({ rel: op.dataset.open }) }); }
+    catch (err) { alert(err.message); }
+    return;
+  }
+  const cp = e.target.closest('[data-copy]');
+  if (cp) {
+    const abs = `${ROOTPATH}\\${cp.dataset.copy}`.replaceAll('/', '\\');
+    try { await navigator.clipboard.writeText(abs); cp.textContent = '✓'; setTimeout(() => { cp.textContent = '📋'; }, 1200); }
+    catch (err) { alert('클립보드 복사 실패: ' + err.message); }
+  }
+});
+
+// 진행 중 카드의 경과 시간 타이머
+setInterval(() => {
+  for (const el of document.querySelectorAll('[data-elapsed]')) {
+    const sec = Math.max(0, Math.round((Date.now() - Number(el.dataset.elapsed)) / 1000));
+    el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  }
+}, 1000);
+
+loadOpts();
+loadHistory();
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

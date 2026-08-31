@@ -1,0 +1,7 @@
+.env
+input/
+output/
+logs/
+node_modules/
+staging/
+history/

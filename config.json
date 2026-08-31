@@ -1,0 +1,65 @@
+{
+  "meshy": {
+    "ai_model": "latest",
+    "should_texture": true,
+    "enable_pbr": true,
+    "texture_resolution": "2k",
+    "should_remesh": false,
+    "pose_mode": "a-pose",
+    "target_formats": [
+      "glb",
+      "fbx"
+    ],
+    "image_enhancement": true,
+    "remove_lighting": true,
+    "ultra_mode": false,
+    "target_polycount": null,
+    "auto_size": false,
+    "topology": "quad",
+    "symmetry_mode": "auto"
+  },
+  "input": {
+    "sheet_mode": "require_views",
+    "view_filenames": {
+      "front": [
+        "front",
+        "f",
+        "front_view"
+      ],
+      "left": [
+        "left",
+        "l",
+        "side_l"
+      ],
+      "back": [
+        "back",
+        "b",
+        "rear"
+      ],
+      "right": [
+        "right",
+        "r",
+        "side_r"
+      ]
+    },
+    "face_filenames": [
+      "face",
+      "head",
+      "portrait",
+      "closeup"
+    ],
+    "use_face_as_texture_guide": true
+  },
+  "runner": {
+    "concurrency": 6,
+    "poll_interval_sec": 4,
+    "poll_timeout_sec": 900,
+    "download_formats": [
+      "glb",
+      "fbx"
+    ],
+    "save_preview": true,
+    "skip_existing": true,
+    "geometry_first": true
+  }
+}
