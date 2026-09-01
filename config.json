@@ -15,8 +15,7 @@
     "ultra_mode": false,
     "target_polycount": null,
     "auto_size": false,
-    "topology": "quad",
-    "symmetry_mode": "auto"
+    "topology": "quad"
   },
   "input": {
     "sheet_mode": "require_views",

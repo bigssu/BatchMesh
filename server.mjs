@@ -389,7 +389,7 @@ http.createServer(async (req, res) => {
       if ('geometry_first' in upd) cfg.runner.geometry_first = !!upd.geometry_first;
       const ALLOWED = ['ai_model', 'should_texture', 'enable_pbr', 'texture_resolution', 'should_remesh',
         'pose_mode', 'image_enhancement', 'remove_lighting', 'ultra_mode', 'target_polycount',
-        'auto_size', 'topology', 'symmetry_mode', 'target_formats'];
+        'auto_size', 'topology', 'target_formats'];
       for (const k of ALLOWED) if (k in upd) cfg.meshy[k] = upd[k];
       // 다운로드 포맷은 생성 포맷과 동기화
       if (Array.isArray(upd.target_formats) && upd.target_formats.length) cfg.runner.download_formats = upd.target_formats;
