@@ -122,6 +122,23 @@ async function refineRects(buf, meta, dets, bg) {
   }
 }
 
+// Meshy 입력 이미지 비율 제한: 2:5 ~ 5:2. 벗어나면 배경색 여백을 좌우/상하에 채워 맞춘다.
+const MIN_RATIO = 0.4, MAX_RATIO = 2.5;
+export async function padToRatio(file, bg) {
+  const m = await sharp(file).metadata();
+  const r = m.width / m.height;
+  if (r >= MIN_RATIO && r <= MAX_RATIO) return null;
+  let x = 0, y = 0;
+  if (r < MIN_RATIO) x = Math.ceil((m.height * (MIN_RATIO + 0.02) - m.width) / 2); // 세로로 김 → 좌우 여백
+  else y = Math.ceil((m.width / (MAX_RATIO - 0.1) - m.height) / 2);                 // 가로로 김 → 상하 여백
+  const out = await sharp(file)
+    .extend({ top: y, bottom: y, left: x, right: x, background: { ...bg, alpha: 1 } })
+    .png().toBuffer();
+  fs.writeFileSync(file, out);
+  const after = await sharp(out).metadata();
+  return { width: after.width, height: after.height };
+}
+
 // 크롭 정리: 배경과 분리된 성분 중 가장 큰 것(본체)만 남기고 나머지(이웃 그림 조각,
 // 텍스트, 그림자)를 배경색으로 지운다.
 export async function cleanCrop(file, bg) {
@@ -235,6 +252,7 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
     const file = path.join(outDir, `${d.label}.png`);
     await sharp(buf).extract(R).composite(overlays).png().toFile(file);
     await cleanCrop(file, bg); // 남은 이웃 그림 조각 제거
+    await padToRatio(file, bg); // Meshy 비율 제한(2:5~5:2) 맞추기
     views.push(d.label);
   }));
 
