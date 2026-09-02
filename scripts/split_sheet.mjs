@@ -371,6 +371,11 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
   const grid = await refineRects(buf, meta, dets, bg); // 뷰 박스를 픽셀 성분 bbox로 확장/보정
   if (process.env.SPLIT_DEBUG) console.error('[dbg] after: ', dets.map((d) => `${d.label} x=${d.rect.left}..${d.rect.left + d.rect.width}`).join(' | '));
 
+  // 성분 → 소유 뷰. 어느 뷰도 갖지 않은 작은 성분(창백한 얼굴의 눈·입 등)은
+  // 지우지 않는다. 남은 이웃 부스러기는 cleanCrop이 처리한다.
+  const ownerOf = new Map();
+  for (const d of dets) for (const id of d.ids ?? []) ownerOf.set(id, d);
+
   const views = [];
   // 뷰별 크롭은 독립적이라 병렬 처리 (libvips는 워커 스레드에서 돎)
   await Promise.all(dets.filter((d) => d.label !== 'other').map(async (d) => {
@@ -390,7 +395,9 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
         const sx = Math.min(sw - 1, x0 + x);
         const id = comp[Math.min(sh - 1, y0 + y) * sw + sx];
         if (id < 0 || own.has(id)) continue;
-        if (shared.has(id) && d.clip && sx >= d.clip.x0 && sx <= d.clip.x1) continue;
+        if (shared.has(id)) { // 두 인물이 붙은 성분 → 내 컷 범위 밖만 지움
+          if (!d.clip || (sx >= d.clip.x0 && sx <= d.clip.x1)) continue;
+        } else if (!ownerOf.has(id)) continue; // 주인 없는 작은 디테일 → 보존
         mask[y * mw + x] = 1; any = true;
       }
       if (any) {
