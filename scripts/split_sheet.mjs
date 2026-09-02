@@ -79,7 +79,8 @@ async function maskComponents(input, small, bg) {
 async function refineRects(buf, meta, dets, bg) {
   const { comp, sizes, fg, sw, sh, scale } = await maskComponents(buf, 800, bg);
   const k = sizes.length;
-  if (!k) return;
+  const grid = { comp, sw, sh, scale };
+  if (!k) return grid;
 
   const boxes = Array.from({ length: k }, () => ({ x0: Infinity, y0: Infinity, x1: -1, y1: -1 }));
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
@@ -95,12 +96,13 @@ async function refineRects(buf, meta, dets, bg) {
   const clusters = [];
   for (let c = 0; c < k; c++) {
     if (sizes[c] < sw * sh * 0.0005) continue;
-    const b = { ...boxes[c], area: sizes[c] };
+    const b = { ...boxes[c], area: sizes[c], ids: [c] };
     const hit = clusters.filter((u) => !(b.x1 < u.x0 || b.x0 > u.x1 || b.y1 < u.y0 || b.y0 > u.y1));
     for (const u of hit) {
       b.x0 = Math.min(b.x0, u.x0); b.y0 = Math.min(b.y0, u.y0);
       b.x1 = Math.max(b.x1, u.x1); b.y1 = Math.max(b.y1, u.y1);
       b.area += u.area;
+      b.ids.push(...u.ids);
       clusters.splice(clusters.indexOf(u), 1);
     }
     clusters.push(b);
@@ -116,17 +118,32 @@ async function refineRects(buf, meta, dets, bg) {
       const id = comp[y * sw + x];
       if (id >= 0) (x < cutX ? cntL : cntR)[id]++;
     }
-    const side = (mine, theirs) => {
+    const side = (isLeft) => {
+      const mine = isLeft ? cntL : cntR, theirs = isLeft ? cntR : cntL;
+      const clip = isLeft ? { x0: c.x0, x1: cutX - 1 } : { x0: cutX, x1: c.x1 };
+      const ids = [], shared = [];
       let u = null, area = 0;
+      const grow = (b) => { u = u ? { x0: Math.min(u.x0, b.x0), y0: Math.min(u.y0, b.y0), x1: Math.max(u.x1, b.x1), y1: Math.max(u.y1, b.y1) } : { ...b }; };
       for (let id = 0; id < k; id++) {
-        if (mine[id] === 0 || mine[id] < theirs[id]) continue;
-        const b = boxes[id];
-        u = u ? { x0: Math.min(u.x0, b.x0), y0: Math.min(u.y0, b.y0), x1: Math.max(u.x1, b.x1), y1: Math.max(u.y1, b.y1) } : { ...b };
-        area += sizes[id];
+        const m = mine[id], t = theirs[id];
+        if (m === 0) continue;
+        if (t > 0 && Math.min(m, t) > (m + t) * 0.25) { shared.push(id); area += m; continue; } // 두 인물이 붙어 한 성분
+        if (m < t) continue;
+        ids.push(id); area += sizes[id]; grow(boxes[id]); // 몸의 일부 → 통째로
       }
-      return u ? { ...u, area } : null;
+      if (shared.length) { // 붙은 성분은 컷 기준으로 픽셀만 취함
+        const set = new Set(shared);
+        const b = { x0: Infinity, y0: Infinity, x1: -1, y1: -1 };
+        for (let y = c.y0; y <= c.y1; y++) for (let x = Math.max(c.x0, clip.x0); x <= Math.min(c.x1, clip.x1); x++) {
+          if (!set.has(comp[y * sw + x])) continue;
+          if (x < b.x0) b.x0 = x; if (x > b.x1) b.x1 = x;
+          if (y < b.y0) b.y0 = y; if (y > b.y1) b.y1 = y;
+        }
+        if (b.x1 >= 0) grow(b);
+      }
+      return u ? { ...u, area, ids, shared, clip } : null;
     };
-    return [side(cntL, cntR), side(cntR, cntL)].filter(Boolean);
+    return [side(true), side(false)].filter(Boolean);
   };
   while (clusters.length < dets.length) {
     const c = clusters.reduce((a, b) => (b.x1 - b.x0 > a.x1 - a.x0 ? b : a));
@@ -176,9 +193,14 @@ async function refineRects(buf, meta, dets, bg) {
     const picked = clusters.slice().sort((a, b) => b.area - a.area).slice(0, dets.length)
       .sort((a, b) => (a.x0 + a.x1) - (b.x0 + b.x1));
     const byX = dets.slice().sort((a, b) => (a.rect.left + a.rect.width / 2) - (b.rect.left + b.rect.width / 2));
-    byX.forEach((d, i) => { d.rect = toRect(picked[i]); });
+    byX.forEach((d, i) => {
+      d.rect = toRect(picked[i]);
+      d.ids = picked[i].ids;
+      d.shared = picked[i].shared ?? [];
+      d.clip = picked[i].clip ?? null;
+    });
     if (process.env.SPLIT_DEBUG) console.error(`[dbg] 클러스터 매칭: ${clusters.length}개 중 ${dets.length}개 사용`);
-    return;
+    return grid;
   }
 
   // 덩어리가 라벨보다 적으면(겹쳐 그린 시트 등) 박스별 최대 겹침 성분으로 보정
@@ -203,12 +225,15 @@ async function refineRects(buf, meta, dets, bg) {
     if (primary < 0 || inside[primary] === 0) continue; // 매칭 실패 → Gemini 박스 유지
     // 본체 bbox와 겹치는 성분(끊긴 몸통 조각·모자·머리카락)까지 합친다.
     let u = { ...boxes[primary] };
+    const ids = [primary];
     for (let c = 0; c < k; c++) {
       if (c === primary || sizes[c] < sw * sh * 0.0005) continue;
       const b = boxes[c];
       if (b.x1 < u.x0 || b.x0 > u.x1 || b.y1 < u.y0 || b.y0 > u.y1) continue; // 겹치지 않음 = 이웃 인물
       u = { x0: Math.min(u.x0, b.x0), y0: Math.min(u.y0, b.y0), x1: Math.max(u.x1, b.x1), y1: Math.max(u.y1, b.y1) };
+      ids.push(c);
     }
+    d.ids = ids;
     const pad = 0.03;
     const uw = (u.x1 - u.x0 + 1) / scale, uh = (u.y1 - u.y0 + 1) / scale;
     const left = Math.max(0, Math.round(u.x0 / scale - uw * pad));
@@ -219,6 +244,7 @@ async function refineRects(buf, meta, dets, bg) {
     if (width > d.rect.width * 2.5 || height > d.rect.height * 2.5) continue;
     d.rect = { left, top, width, height };
   }
+  return grid;
 }
 
 // Meshy 입력 이미지 비율 제한: 2:5 ~ 5:2. 벗어나면 배경색 여백을 좌우/상하에 채워 맞춘다.
@@ -342,31 +368,46 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
 
   const { dominant: bg } = await sharp(buf).stats();
   if (process.env.SPLIT_DEBUG) console.error('[dbg] bg=', bg, 'before:', dets.map((d) => `${d.label} x=${d.rect.left}..${d.rect.left + d.rect.width}`).join(' | '));
-  await refineRects(buf, meta, dets, bg); // 뷰 박스를 픽셀 성분 bbox로 확장/보정
+  const grid = await refineRects(buf, meta, dets, bg); // 뷰 박스를 픽셀 성분 bbox로 확장/보정
   if (process.env.SPLIT_DEBUG) console.error('[dbg] after: ', dets.map((d) => `${d.label} x=${d.rect.left}..${d.rect.left + d.rect.width}`).join(' | '));
 
   const views = [];
   // 뷰별 크롭은 독립적이라 병렬 처리 (libvips는 워커 스레드에서 돎)
   await Promise.all(dets.filter((d) => d.label !== 'other').map(async (d) => {
     const R = d.rect;
-    // 크롭 가장자리에 걸친 이웃 뷰 박스를 배경색으로 마스킹
+    // 이 뷰에 속하지 않는 성분(이웃 인물 조각)만 배경색으로 지운다.
+    // 사각형으로 덮으면 겹치는 구간에 있는 본인의 얼굴·꼬리까지 지워진다.
     const overlays = [];
-    for (const o of dets) {
-      if (o === d) continue;
-      const L = Math.max(R.left, o.rect.left);
-      const T = Math.max(R.top, o.rect.top);
-      const Rt = Math.min(R.left + R.width, o.rect.left + o.rect.width);
-      const B = Math.min(R.top + R.height, o.rect.top + o.rect.height);
-      const iw = Rt - L, ih = B - T;
-      if (iw <= 0 || ih <= 0) continue;
-      // 포함 관계(예: face 박스가 front 안)는 마스킹하면 본체가 지워지므로 제외
-      const minArea = Math.min(R.width * R.height, o.rect.width * o.rect.height);
-      if ((iw * ih) / minArea > 0.5) continue;
-      overlays.push({
-        input: { create: { width: iw, height: ih, channels: 3, background: bg } },
-        left: L - R.left,
-        top: T - R.top,
-      });
+    if (grid && d.ids) {
+      const { comp, sw, sh, scale } = grid;
+      const own = new Set(d.ids);
+      const shared = new Set(d.shared ?? []); // 두 인물이 붙은 성분 → 컷 범위 안쪽만 남김
+      const x0 = Math.floor(R.left * scale), y0 = Math.floor(R.top * scale);
+      const mw = Math.max(1, Math.round(R.width * scale)), mh = Math.max(1, Math.round(R.height * scale));
+      const mask = new Uint8Array(mw * mh);
+      let any = false;
+      for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
+        const sx = Math.min(sw - 1, x0 + x);
+        const id = comp[Math.min(sh - 1, y0 + y) * sw + sx];
+        if (id < 0 || own.has(id)) continue;
+        if (shared.has(id) && d.clip && sx >= d.clip.x0 && sx <= d.clip.x1) continue;
+        mask[y * mw + x] = 1; any = true;
+      }
+      if (any) {
+        const rgba = Buffer.alloc(mw * mh * 4);
+        for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
+          const i = y * mw + x;
+          // 1px 팽창으로 안티앨리어싱 테두리까지 제거
+          const on = mask[i] || (x > 0 && mask[i - 1]) || (x < mw - 1 && mask[i + 1]) ||
+            (y > 0 && mask[i - mw]) || (y < mh - 1 && mask[i + mw]);
+          if (!on) continue;
+          rgba[i * 4] = bg.r; rgba[i * 4 + 1] = bg.g; rgba[i * 4 + 2] = bg.b; rgba[i * 4 + 3] = 255;
+        }
+        overlays.push({
+          input: await sharp(rgba, { raw: { width: mw, height: mh, channels: 4 } })
+            .resize(R.width, R.height, { fit: 'fill', kernel: 'nearest' }).png().toBuffer(),
+        });
+      }
     }
     const file = path.join(outDir, `${d.label}.png`);
     await sharp(buf).extract(R).composite(overlays).png().toFile(file);
