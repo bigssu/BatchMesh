@@ -90,6 +90,45 @@ async function refineRects(buf, meta, dets, bg) {
     if (y < b.y0) b.y0 = y; if (y > b.y1) b.y1 = y;
   }
 
+  // 픽셀로 인물 덩어리를 먼저 찾는다: bbox가 겹치는 성분끼리 묶으면 한 인물이 된다.
+  // (Gemini 좌표는 시트에 따라 통째로 어긋나기도 해서 기하는 픽셀로, 라벨만 Gemini로 쓴다.)
+  const clusters = [];
+  for (let c = 0; c < k; c++) {
+    if (sizes[c] < sw * sh * 0.0005) continue;
+    const b = { ...boxes[c], area: sizes[c] };
+    const hit = clusters.filter((u) => !(b.x1 < u.x0 || b.x0 > u.x1 || b.y1 < u.y0 || b.y0 > u.y1));
+    for (const u of hit) {
+      b.x0 = Math.min(b.x0, u.x0); b.y0 = Math.min(b.y0, u.y0);
+      b.x1 = Math.max(b.x1, u.x1); b.y1 = Math.max(b.y1, u.y1);
+      b.area += u.area;
+      clusters.splice(clusters.indexOf(u), 1);
+    }
+    clusters.push(b);
+  }
+  const toRect = (u) => {
+    const pad = 0.03;
+    const uw = (u.x1 - u.x0 + 1) / scale, uh = (u.y1 - u.y0 + 1) / scale;
+    const left = Math.max(0, Math.round(u.x0 / scale - uw * pad));
+    const top = Math.max(0, Math.round(u.y0 / scale - uh * pad));
+    return {
+      left, top,
+      width: Math.min(meta.width - left, Math.round(uw * (1 + 2 * pad))),
+      height: Math.min(meta.height - top, Math.round(uh * (1 + 2 * pad))),
+    };
+  };
+
+  // 감지된 그림 수만큼 큰 덩어리를 골라 좌→우 순서로 라벨과 짝짓는다.
+  // (스케일 참고표 같은 작은 덩어리는 자동으로 탈락)
+  if (clusters.length >= dets.length) {
+    const picked = clusters.slice().sort((a, b) => b.area - a.area).slice(0, dets.length)
+      .sort((a, b) => (a.x0 + a.x1) - (b.x0 + b.x1));
+    const byX = dets.slice().sort((a, b) => (a.rect.left + a.rect.width / 2) - (b.rect.left + b.rect.width / 2));
+    byX.forEach((d, i) => { d.rect = toRect(picked[i]); });
+    if (process.env.SPLIT_DEBUG) console.error(`[dbg] 클러스터 매칭: ${clusters.length}개 중 ${dets.length}개 사용`);
+    return;
+  }
+
+  // 덩어리가 라벨보다 적으면(겹쳐 그린 시트 등) 박스별 최대 겹침 성분으로 보정
   for (const d of dets) {
     if (d.label === 'other') continue;
     const rx0 = Math.max(0, Math.floor(d.rect.left * scale));
@@ -101,23 +140,30 @@ async function refineRects(buf, meta, dets, bg) {
       const c = comp[y * sw + x];
       if (c >= 0) inside[c]++;
     }
-    let u = null;
+    // 박스와 가장 많이 겹치는 성분 = 이 뷰의 본체. (박스가 인물과 어긋나 있어도
+    // 본체를 고르므로, "박스에 N% 들어있나"로 거르던 방식과 달리 반쪽 크롭이 안 나온다.)
+    let primary = -1;
     for (let c = 0; c < k; c++) {
-      if (sizes[c] < sw * sh * 0.0005) continue;     // 노이즈 성분 제외
-      if (inside[c] / sizes[c] < 0.6) continue;       // 박스에 60% 이상 들어있는 성분만
-      u = u
-        ? { x0: Math.min(u.x0, boxes[c].x0), y0: Math.min(u.y0, boxes[c].y0), x1: Math.max(u.x1, boxes[c].x1), y1: Math.max(u.y1, boxes[c].y1) }
-        : { ...boxes[c] };
+      if (sizes[c] < sw * sh * 0.0005) continue; // 노이즈 성분 제외
+      if (primary < 0 || inside[c] > inside[primary]) primary = c;
     }
-    if (!u) continue; // 성분 매칭 실패 → Gemini 박스 유지
+    if (primary < 0 || inside[primary] === 0) continue; // 매칭 실패 → Gemini 박스 유지
+    // 본체 bbox와 겹치는 성분(끊긴 몸통 조각·모자·머리카락)까지 합친다.
+    let u = { ...boxes[primary] };
+    for (let c = 0; c < k; c++) {
+      if (c === primary || sizes[c] < sw * sh * 0.0005) continue;
+      const b = boxes[c];
+      if (b.x1 < u.x0 || b.x0 > u.x1 || b.y1 < u.y0 || b.y0 > u.y1) continue; // 겹치지 않음 = 이웃 인물
+      u = { x0: Math.min(u.x0, b.x0), y0: Math.min(u.y0, b.y0), x1: Math.max(u.x1, b.x1), y1: Math.max(u.y1, b.y1) };
+    }
     const pad = 0.03;
     const uw = (u.x1 - u.x0 + 1) / scale, uh = (u.y1 - u.y0 + 1) / scale;
     const left = Math.max(0, Math.round(u.x0 / scale - uw * pad));
     const top = Math.max(0, Math.round(u.y0 / scale - uh * pad));
     const width = Math.min(meta.width - left, Math.round(uw * (1 + 2 * pad)));
     const height = Math.min(meta.height - top, Math.round(uh * (1 + 2 * pad)));
-    // 폭주 가드: 이웃과 붙은 성분이면 원래 박스 유지
-    if (width > d.rect.width * 1.8 || height > d.rect.height * 1.8) continue;
+    // 폭주 가드: 이웃까지 삼킬 만큼 커지면 원래 박스 유지
+    if (width > d.rect.width * 2.5 || height > d.rect.height * 2.5) continue;
     d.rect = { left, top, width, height };
   }
 }
@@ -150,9 +196,27 @@ export async function cleanCrop(file, bg) {
   if (largest < n * 0.03) return; // 본체 판별 실패 시 건드리지 않음
   const keep = sizes.indexOf(largest);
 
+  // 성분별 bbox — 캐릭터는 창백한 피부/옷 때문에 여러 성분으로 끊길 수 있으므로
+  // "가장 큰 것만 남기기"는 위험하다. 본체 bbox와 겹치는 성분은 캐릭터의 일부
+  // (몸통 조각, 코·입 같은 내부 디테일)로 보고 남기고, 겹치지 않는 것만 지운다.
+  const bb = Array.from({ length: sizes.length }, () => ({ x0: Infinity, y0: Infinity, x1: -1, y1: -1 }));
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+    const c = comp[y * sw + x];
+    if (c < 0) continue;
+    const b = bb[c];
+    if (x < b.x0) b.x0 = x; if (x > b.x1) b.x1 = x;
+    if (y < b.y0) b.y0 = y; if (y > b.y1) b.y1 = y;
+  }
+  const main = bb[keep];
+  const outside = (b) => b.x1 < main.x0 || b.x0 > main.x1 || b.y1 < main.y0 || b.y0 > main.y1;
+  if (process.env.SPLIT_DEBUG) {
+    const drop = sizes.map((s, i) => [i, s]).filter(([i]) => i !== keep && outside(bb[i]));
+    console.error(`[dbg] cleanCrop ${path.basename(file)}: 성분 ${sizes.length}개, 본체=${largest}px, 삭제=${drop.length}개(${drop.reduce((a, [, s]) => a + s, 0)}px)`);
+  }
+
   // 지울 영역 + 1px 팽창(안티앨리어싱 헤일로 제거)
   const erase = new Uint8Array(n);
-  for (let i = 0; i < n; i++) if (comp[i] >= 0 && comp[i] !== keep) erase[i] = 1;
+  for (let i = 0; i < n; i++) if (comp[i] >= 0 && comp[i] !== keep && outside(bb[comp[i]])) erase[i] = 1;
   const dil = new Uint8Array(n);
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
     const i = y * sw + x;
@@ -224,7 +288,9 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
   }
 
   const { dominant: bg } = await sharp(buf).stats();
+  if (process.env.SPLIT_DEBUG) console.error('[dbg] bg=', bg, 'before:', dets.map((d) => `${d.label} x=${d.rect.left}..${d.rect.left + d.rect.width}`).join(' | '));
   await refineRects(buf, meta, dets, bg); // 뷰 박스를 픽셀 성분 bbox로 확장/보정
+  if (process.env.SPLIT_DEBUG) console.error('[dbg] after: ', dets.map((d) => `${d.label} x=${d.rect.left}..${d.rect.left + d.rect.width}`).join(' | '));
 
   const views = [];
   // 뷰별 크롭은 독립적이라 병렬 처리 (libvips는 워커 스레드에서 돎)
