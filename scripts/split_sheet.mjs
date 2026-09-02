@@ -7,6 +7,7 @@ import sharp from 'sharp';
 const GEMINI_MODEL = 'gemini-3.5-flash'; // 2.5-flash 대비 박스 오차 절반 (실측 61px → 33px)
 const LABELS = ['front', 'left', 'back', 'right', 'face'];
 const FG_THRESH = 60 * 60; // 배경색과의 RGB 거리 제곱
+const MIN_SHORT = 600; // 크롭의 짧은 변 최소 픽셀 (미만이면 업스케일)
 
 const PROMPT = (hint) => `This image is a character reference sheet (turnaround) of ONE character.
 Detect each depiction of the character and classify it with exactly one label:
@@ -263,6 +264,40 @@ async function refineRects(buf, meta, dets, bg) {
   return grid;
 }
 
+// Gemini 이미지 모델로 업스케일 (Vertex Imagen 업스케일은 2026-06 은퇴).
+// short 또는 long 중 하나를 목표 픽셀로 주면 원본 비율을 유지해 확대한다.
+export async function upscale(file, { short, long }) {
+  const buf = fs.readFileSync(file);
+  const m = await sharp(buf).metadata();
+  const curShort = Math.min(m.width, m.height), curLong = Math.max(m.width, m.height);
+  const factor = short ? short / curShort : long / curLong;
+  if (factor <= 1) return null; // 이미 충분함
+  const key = process.env.GOOGLE_API_KEY;
+  if (!key) throw new Error('GOOGLE_API_KEY 환경변수 없음');
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [
+        { inline_data: { mime_type: 'image/png', data: buf.toString('base64') } },
+        { text: 'Upscale this image to high resolution. Reproduce the EXACT same image with sharper, more refined detail — identical character design, pose, proportions, colors, framing and background. Do not add, remove, crop, or restyle anything.' },
+      ] }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: curLong * factor > 1400 ? '2K' : '1K' } },
+    }),
+  });
+  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const parts = (await res.json()).candidates?.[0]?.content?.parts ?? [];
+  const img = parts.map((p) => p.inlineData ?? p.inline_data).find(Boolean);
+  if (!img) throw new Error('업스케일 응답에 이미지 없음');
+  const out = Buffer.from(img.data, 'base64');
+  const om = await sharp(out).metadata();
+  const drift = Math.abs(om.width / om.height - m.width / m.height) / (m.width / m.height);
+  if (drift > 0.1) throw new Error('업스케일 결과의 비율이 원본과 달라 폐기했습니다 — 다시 시도하세요');
+  const w = Math.round(m.width * factor), h = Math.round(m.height * factor);
+  fs.writeFileSync(file, await sharp(out).resize(w, h, { fit: 'fill' }).png().toBuffer());
+  return { width: w, height: h };
+}
+
 // Meshy 입력 이미지 비율 제한: 2:5 ~ 5:2. 벗어나면 배경색 여백을 좌우/상하에 채워 맞춘다.
 const MIN_RATIO = 0.4, MAX_RATIO = 2.5;
 export async function padToRatio(file, bg) {
@@ -435,6 +470,17 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
     const file = path.join(outDir, `${d.label}.png`);
     await sharp(buf).extract(R).composite(overlays).png().toFile(file);
     await cleanCrop(file, bg); // 남은 이웃 그림 조각 제거
+    // 크롭이 작으면 자동 업스케일 (짧은 변 600px 확보). 모델이 이미지를 안 줄 때가
+    // 있어 한 번 재시도하고, 그래도 실패하면 원본 그대로 진행한다.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await upscale(file, { short: MIN_SHORT });
+        if (r && process.env.SPLIT_DEBUG) console.error(`[dbg] 업스케일 ${d.label}: → ${r.width}x${r.height}`);
+        break;
+      } catch (e) {
+        if (attempt) console.error(`업스케일 건너뜀 ${d.label}: ${e.message}`);
+      }
+    }
     await padToRatio(file, bg); // Meshy 비율 제한(2:5~5:2) 맞추기
     views.push(d.label);
   }));

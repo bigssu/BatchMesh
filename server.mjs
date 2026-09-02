@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import sharp from 'sharp';
-import { splitSheet } from './scripts/split_sheet.mjs';
+import { splitSheet, upscale } from './scripts/split_sheet.mjs';
 
 try { process.loadEnvFile(path.resolve('.env')); } catch {}
 
@@ -155,42 +155,6 @@ async function meshyApi(method, url, body) {
   }
 }
 
-// --- 크롭 2K 업스케일: Gemini 이미지 모델로 충실 복원 업스케일 (Imagen 업스케일은 2026-06 은퇴) ---
-// 긴 변을 2048px로: 세로형 → 세로 2048, 가로형 → 가로 2048. 원본 비율 유지.
-async function upscale2k(file) {
-  const buf = fs.readFileSync(file);
-  const meta = await sharp(buf).metadata();
-  const long = Math.max(meta.width, meta.height);
-  if (long >= 2048) throw new Error(`이미 2K 이상입니다 (${meta.width}×${meta.height})`);
-  const key = process.env.GOOGLE_API_KEY;
-  if (!key) throw new Error('GOOGLE_API_KEY 환경변수 없음');
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent', {
-    method: 'POST',
-    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inline_data: { mime_type: 'image/png', data: buf.toString('base64') } },
-          { text: 'Upscale this image to high resolution. Reproduce the EXACT same image with sharper, more refined detail — identical character design, pose, proportions, colors, framing and background. Do not add, remove, crop, or restyle anything.' },
-        ],
-      }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: '2K' } },
-    }),
-  });
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const parts = (await res.json()).candidates?.[0]?.content?.parts ?? [];
-  const img = parts.map((p) => p.inlineData ?? p.inline_data).find(Boolean);
-  if (!img) throw new Error('업스케일 응답에 이미지 없음');
-  const outBuf = Buffer.from(img.data, 'base64');
-  const om = await sharp(outBuf).metadata();
-  const drift = Math.abs(om.width / om.height - meta.width / meta.height) / (meta.width / meta.height);
-  if (drift > 0.1) throw new Error('업스케일 결과의 비율이 원본과 달라 폐기했습니다 — 다시 시도하세요');
-  const scale = 2048 / long;
-  const tw = Math.round(meta.width * scale), th = Math.round(meta.height * scale);
-  const resized = await sharp(outBuf).resize(tw, th, { fit: 'fill' }).png().toBuffer();
-  fs.writeFileSync(file, resized);
-  return { width: tw, height: th };
-}
 
 const remeshJobs = []; // 진행 중인 파생 작업 (추출/텍스처 — UI 표시용)
 
@@ -433,7 +397,8 @@ http.createServer(async (req, res) => {
       if (!LABELS.includes(view) && view !== 'sheet') return json(res, 400, { error: 'bad view' });
       const file = path.join(STAGING, id, `${view}.png`);
       if (!fs.existsSync(file)) return json(res, 404, { error: '크롭 없음' });
-      const dims = await upscale2k(file);
+      const dims = await upscale(file, { long: 2048 });
+      if (!dims) return json(res, 400, { error: '이미 2K 이상입니다' });
       // 이미 승인된 시트면 input/ 사본도 갱신
       try { if (fs.existsSync(path.join(INPUT, id, `${view}.png`))) fs.copyFileSync(file, path.join(INPUT, id, `${view}.png`)); } catch {}
       touch(id); // rev 갱신 → 이미지 새로고침
