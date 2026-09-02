@@ -108,15 +108,25 @@ async function refineRects(buf, meta, dets, bg) {
   if (process.env.SPLIT_DEBUG) console.error('[dbg] 클러스터:', clusters.map((c) => `${Math.round(c.x0 / scale)}..${Math.round(c.x1 / scale)}(${c.area})`).join(' '));
   // 인물이 서로 닿아 한 덩어리로 묶였으면(배경 간격 없음) 세로 밀도가 가장 낮은
   // 지점에서 쪼갠다. 라벨 수만큼 덩어리가 생길 때까지 넓은 것부터 반복.
-  const tight = (x0, x1, y0, y1) => {
-    let a = { x0: Infinity, y0: Infinity, x1: -1, y1: -1, area: 0 };
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      if (!fg[y * sw + x]) continue;
-      a.area++;
-      if (x < a.x0) a.x0 = x; if (x > a.x1) a.x1 = x;
-      if (y < a.y0) a.y0 = y; if (y > a.y1) a.y1 = y;
+  // 컷 좌/우로 나누되 성분(꼬리·귀 등 몸의 일부)은 다수결로 통째 배정한다.
+  // 픽셀로 자르면 경계를 넘는 꼬리·얼굴이 잘려나가기 때문.
+  const splitAt = (c, cutX) => {
+    const cntL = new Float64Array(k), cntR = new Float64Array(k);
+    for (let y = c.y0; y <= c.y1; y++) for (let x = c.x0; x <= c.x1; x++) {
+      const id = comp[y * sw + x];
+      if (id >= 0) (x < cutX ? cntL : cntR)[id]++;
     }
-    return a.area > 0 ? a : null;
+    const side = (mine, theirs) => {
+      let u = null, area = 0;
+      for (let id = 0; id < k; id++) {
+        if (mine[id] === 0 || mine[id] < theirs[id]) continue;
+        const b = boxes[id];
+        u = u ? { x0: Math.min(u.x0, b.x0), y0: Math.min(u.y0, b.y0), x1: Math.max(u.x1, b.x1), y1: Math.max(u.y1, b.y1) } : { ...b };
+        area += sizes[id];
+      }
+      return u ? { ...u, area } : null;
+    };
+    return [side(cntL, cntR), side(cntR, cntL)].filter(Boolean);
   };
   while (clusters.length < dets.length) {
     const c = clusters.reduce((a, b) => (b.x1 - b.x0 > a.x1 - a.x0 ? b : a));
@@ -142,7 +152,7 @@ async function refineRects(buf, meta, dets, bg) {
       if (process.env.SPLIT_DEBUG) console.error(`[dbg] 분리 실패: w=${w} cut=${cut} low=${low} mean=${Math.round(mean)}`);
       break; // 계곡이 전혀 없음 → 더 못 쪼갬
     }
-    const parts = [tight(c.x0, c.x0 + cut - 1, c.y0, c.y1), tight(c.x0 + cut + 1, c.x1, c.y0, c.y1)].filter(Boolean);
+    const parts = splitAt(c, c.x0 + cut);
     if (parts.length !== 2) break;
     clusters.splice(clusters.indexOf(c), 1, ...parts);
     if (process.env.SPLIT_DEBUG) console.error(`[dbg] 붙은 인물 분리: x=${Math.round((c.x0 + cut) / scale)} (밀도 ${low}/${Math.round(mean)})`);
