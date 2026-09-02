@@ -107,6 +107,22 @@ async function refineRects(buf, meta, dets, bg) {
     }
     clusters.push(b);
   }
+  // 목·손목이 배경색과 가까워 끊기면 머리·모자가 별도 덩어리가 된다. 인물은 좌우로
+  // 나열되므로, 작은 덩어리의 x범위가 큰 덩어리 안에 대부분 들어가면 같은 인물로 합친다.
+  for (let i = clusters.length - 1; i >= 0; i--) {
+    const s = clusters[i];
+    const host = clusters.find((b) => {
+      if (b === s || b.area < s.area * 2) return false;
+      const ov = Math.min(s.x1, b.x1) - Math.max(s.x0, b.x0) + 1;
+      return ov > 0 && ov / (s.x1 - s.x0 + 1) >= 0.7;
+    });
+    if (!host) continue;
+    host.x0 = Math.min(host.x0, s.x0); host.y0 = Math.min(host.y0, s.y0);
+    host.x1 = Math.max(host.x1, s.x1); host.y1 = Math.max(host.y1, s.y1);
+    host.area += s.area;
+    host.ids.push(...s.ids);
+    clusters.splice(i, 1);
+  }
   if (process.env.SPLIT_DEBUG) console.error('[dbg] 클러스터:', clusters.map((c) => `${Math.round(c.x0 / scale)}..${Math.round(c.x1 / scale)}(${c.area})`).join(' '));
   // 인물이 서로 닿아 한 덩어리로 묶였으면(배경 간격 없음) 세로 밀도가 가장 낮은
   // 지점에서 쪼갠다. 라벨 수만큼 덩어리가 생길 때까지 넓은 것부터 반복.
