@@ -11,15 +11,15 @@ const FG_THRESH = 60 * 60; // 배경색과의 RGB 거리 제곱
 const PROMPT = (hint) => `This image is a character reference sheet (turnaround) of ONE character.
 Detect each depiction of the character and classify it with exactly one label:
 - "front": full-body front view
-- "left": full-body side view where the character faces the viewer's LEFT
+- "right": full-body side view where the character's face/body points toward the viewer's LEFT edge
 - "back": full-body back view
-- "right": full-body side view where the character faces the viewer's RIGHT
+- "left": full-body side view where the character's face/body points toward the viewer's RIGHT edge
 - "face": face/head close-up or facial detail cut
 - "other": ANY remaining depiction of the character (alternate pose, extra angle, detail cut, partial render). Label every one of them; "other" may appear multiple times.
 
 Rules:
 - Labels front/left/back/right/face at most once each. Only include labels actually present.
-- If the sheet has two side views facing the SAME direction (duplicates), label only the clearer ONE with its correct side and label the rest "other". NEVER assign "left" to a right-facing view or vice versa.
+- If the sheet has two side views facing the SAME direction (duplicates), label only the clearer ONE with its correct side and label the rest "other". Never swap the two side labels.
 - Every visible depiction of the character must get a box (use "other" for extras). Missing boxes cause cropping artifacts.
 - Boxes must contain the ENTIRE depiction including snouts, jaws, claws, pincers, tails, wings and any protruding parts. When unsure, make the box larger.
 - Ignore text, color swatches, small item/prop callouts.
