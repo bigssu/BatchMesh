@@ -46,6 +46,9 @@
   .mini3d { width:340px; height:240px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#1e2028; }
   .mini3d iframe { width:100%; height:100%; border:0; display:block; }
   .gentime { font-size:11px; color:var(--dim); margin-top:2px; }
+  .slot { width:120px; height:180px; border:2px dashed var(--line); border-radius:6px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; color:var(--dim); cursor:pointer; font-size:13px; text-align:center; line-height:1.6; }
+  .slot:hover { border-color:var(--acc); color:var(--acc); }
   .proc { width:340px; height:240px; border:1px dashed var(--line); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:var(--dim); background:var(--bg); font-size:13px; }
   .proc .bar, .drop-proc .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
   .proc .bar { width:70%; }
@@ -75,6 +78,9 @@
 <body>
 <h1>Meshy 캐릭터 시트 검수</h1>
 <div id="drop"><span id="droptext">시트 이미지를 여기에 드래그하거나 클릭해서 선택 (여러 장 가능)</span><input id="file" type="file" accept="image/*" multiple hidden></div>
+<div style="margin:-8px 0 16px"><button id="newmanual">뷰를 직접 올릴 빈 카드 만들기</button>
+  <span style="color:var(--dim);font-size:13px"> — 시트 분해 없이 front/back/left/right/face를 각각 업로드</span></div>
+<input id="viewfile" type="file" accept="image/*" hidden>
 <details id="opts" open>
   <summary>생성 옵션 <span style="color:var(--dim)">(저장하면 다음 생성부터 적용)</span></summary>
   <div class="optgrid">
@@ -244,8 +250,11 @@ function buildCard(s) {
     const c = document.createElement('div');
     c.className = 'card';
     const bust = s.rev;
-    const crops = s.views.map((v) => figHtml(`staging/${s.id}/${v}.png`, bust,
-      `${v} <button class="x" data-upscale="${v}" title="GCP 업스케일로 긴 변 2048px화">2K</button> <button class="x" data-view="${v}" title="이 크롭만 삭제">✕</button>`)).join('');
+    // 5개 뷰 슬롯: 있으면 이미지, 없으면 업로드 자리
+    const crops = ['front', 'left', 'back', 'right', 'face'].map((v) => s.views.includes(v)
+      ? figHtml(`staging/${s.id}/${v}.png`, bust,
+        `${v} <button class="x" data-upload="${v}" title="다른 이미지로 교체">교체</button> <button class="x" data-upscale="${v}" title="GCP 업스케일로 긴 변 2048px화">2K</button> <button class="x" data-view="${v}" title="이 크롭만 삭제">✕</button>`)
+      : `<figure><div class="slot" data-upload="${v}" title="클릭해서 ${v} 이미지 업로드">＋<br>${v}</div><figcaption>${v} 없음</figcaption></figure>`).join('');
     const result = (s.gens ?? []).map((g, i) => genHtml(`output/${s.id}/${g.name}`, g, i + 1, true)).join('');
     // 진행 중 작업 자리표시 카드: 추출/텍스처(실제 진행률) / 생성·분해(무한 바)
     const procs = (s.jobs ?? []).map((j) => procHtml(
@@ -270,7 +279,7 @@ function buildCard(s) {
         ${s.status === 'error' ? `<span class="err-msg">${s.error ?? ''}</span>` : ''}
       </div>
       <div class="imgs">
-        ${figHtml(`staging/${s.id}/sheet.png`, bust, '원본 시트', 'sheet-thumb')}
+        ${s.hasSheet ? figHtml(`staging/${s.id}/sheet.png`, bust, '원본 시트', 'sheet-thumb') : ''}
         ${crops}${result}${procs}
       </div>
       <div class="btns">
@@ -281,6 +290,7 @@ function buildCard(s) {
         <button class="danger" data-act="delete">삭제</button>
       </div>`;
     c.querySelectorAll('button[data-act]').forEach((b) => b.onclick = () => act(s.id, b.dataset.act, c));
+    c.querySelectorAll('[data-upload]').forEach((el) => el.onclick = () => pickView(s.id, el.dataset.upload));
     c.querySelectorAll('button[data-upscale]').forEach((b) => b.onclick = () =>
       busyBtn(b, '…', () => api(`/api/sheets/${s.id}/upscale/${b.dataset.upscale}`, { method: 'POST' })).then(refresh));
     c.querySelectorAll('button.x[data-view]').forEach((b) => b.onclick = async () => {
@@ -357,6 +367,34 @@ async function upload(files) {
     $('#drop').classList.remove('busy');
   }
 }
+
+// --- 뷰 직접 업로드 ---
+let pending = null;
+function pickView(id, label) { pending = { id, label }; $('#viewfile').value = ''; $('#viewfile').click(); }
+$('#viewfile').onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f || !pending) return;
+  const { id, label } = pending;
+  const dz = $('#droptext');
+  const orig = dz.innerHTML;
+  $('#drop').classList.add('busy');
+  dz.innerHTML = `<div class="drop-proc"><div><b>${label} 업로드 중…</b> ${f.name.replace(/[<>&"]/g, '')}</div>
+    <div class="bar indet"><div class="fill"></div></div></div>`;
+  try {
+    const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
+    await api(`/api/sheets/${id}/view/${label}`, { method: 'POST', body: JSON.stringify({ dataUrl }) });
+  } catch (err) { alert(err.message); }
+  dz.innerHTML = orig;
+  $('#drop').classList.remove('busy');
+  pending = null;
+  refresh();
+};
+$('#newmanual').onclick = async () => {
+  const name = prompt('캐릭터 이름을 입력하세요 (폴더 이름으로 사용)');
+  if (!name) return;
+  try { await api('/api/sheets', { method: 'POST', body: JSON.stringify({ name, manual: true }) }); } catch (e) { alert(e.message); }
+  refresh();
+};
 
 $('#drop').onclick = () => { if (!$('#drop').classList.contains('busy')) $('#file').click(); };
 $('#file').onchange = (e) => upload([...e.target.files]);

@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import sharp from 'sharp';
-import { splitSheet, upscale } from './scripts/split_sheet.mjs';
+import { splitSheet, upscale, padToRatio } from './scripts/split_sheet.mjs';
 
 try { process.loadEnvFile(path.resolve('.env')); } catch {}
 
@@ -76,6 +76,7 @@ function listSheets() {
       let created = 0; try { created = fs.statSync(path.join(STAGING, id)).birthtimeMs; } catch {}
       return {
         id, ...m, views, done: gens.length > 0, gens, rev, jobs, created,
+        hasSheet: fs.existsSync(path.join(STAGING, id, 'sheet.png')),
         generating: run.running && run.ids.includes(id),
         runStarted: run.started ?? null,
         lastError: lastErrors[id] ?? null,
@@ -84,12 +85,32 @@ function listSheets() {
     .sort((a, b) => b.created - a.created); // 최신 시트가 위로
 }
 
-async function createSheet(name, dataUrl) {
+function newSheetDir(name) {
   let id = path.basename(name, path.extname(name)).toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'sheet';
   let n = 2;
   while (fs.existsSync(path.join(STAGING, id))) id = `${id.replace(/-\d+$/, '')}-${n++}`;
+  fs.mkdirSync(path.join(STAGING, id), { recursive: true });
+  return id;
+}
+
+// 뷰 이미지 직접 업로드 — 시트 분해를 건너뛰고 front/back/left/right/face를 사람이 넣는 경로
+async function saveView(id, label, dataUrl) {
   const dir = path.join(STAGING, id);
-  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${label}.png`);
+  await sharp(Buffer.from(dataUrl.replace(/^data:[^,]+,/, ''), 'base64')).png().toFile(file);
+  const { dominant: bg } = await sharp(file).stats();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { await upscale(file, { short: 600 }); break; } catch {}
+  }
+  await padToRatio(file, bg);
+  try { if (fs.existsSync(path.join(INPUT, id, `${label}.png`))) fs.copyFileSync(file, path.join(INPUT, id, `${label}.png`)); } catch {}
+  touch(id);
+  return sharp(file).metadata();
+}
+
+async function createSheet(name, dataUrl) {
+  const id = newSheetDir(name);
+  const dir = path.join(STAGING, id);
   const b64 = dataUrl.replace(/^data:[^,]+,/, '');
   // 포맷 통일: 무엇이 오든 png로 저장
   await sharp(Buffer.from(b64, 'base64')).png().toFile(path.join(dir, 'sheet.png'));
@@ -362,7 +383,12 @@ http.createServer(async (req, res) => {
     }
     if (p === '/api/sheets' && req.method === 'GET') return json(res, 200, listSheets());
     if (p === '/api/sheets' && req.method === 'POST') {
-      const { name, dataUrl } = JSON.parse(await readBody(req));
+      const { name, dataUrl, manual } = JSON.parse(await readBody(req));
+      if (manual) { // 시트 없이 뷰를 직접 올리는 빈 카드
+        const id = newSheetDir(name || 'character');
+        writeMeta(id, { status: 'review', manual: true });
+        return json(res, 200, { id });
+      }
       const id = await createSheet(name, dataUrl);
       return json(res, 200, { id });
     }
@@ -406,6 +432,14 @@ http.createServer(async (req, res) => {
     }
     // 크롭 1장만 삭제 (검수 중 불필요한 뷰 제외용)
     const mv = p.match(/^\/api\/sheets\/([a-z0-9_-]+)\/view\/([a-z]+)$/);
+    if (mv && req.method === 'POST') { // 뷰 이미지 직접 업로드
+      const [, id, label] = mv;
+      if (!LABELS.includes(label)) return json(res, 400, { error: 'bad label' });
+      if (!fs.existsSync(path.join(STAGING, id))) return json(res, 404, { error: '시트 없음' });
+      const { dataUrl } = JSON.parse(await readBody(req));
+      const dim = await saveView(id, label, dataUrl);
+      return json(res, 200, { ok: true, width: dim.width, height: dim.height });
+    }
     if (mv && req.method === 'DELETE') {
       const [, id, label] = mv;
       if (!LABELS.includes(label)) return json(res, 400, { error: 'bad label' });
