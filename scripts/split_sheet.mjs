@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3.5-flash'; // 2.5-flash 대비 박스 오차 절반 (실측 61px → 33px)
 const LABELS = ['front', 'left', 'back', 'right', 'face'];
 const FG_THRESH = 60 * 60; // 배경색과의 RGB 거리 제곱
 
@@ -297,7 +297,7 @@ export async function splitSheet(sheetPath, outDir, hint = '') {
             { text: PROMPT(hint) },
           ],
         }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
+        generationConfig: { responseMimeType: 'application/json', temperature: 0 }, // 좌표는 결정적으로
       }),
     },
   );
