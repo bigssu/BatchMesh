@@ -105,6 +105,7 @@ async function refineRects(buf, meta, dets, bg) {
     }
     clusters.push(b);
   }
+  if (process.env.SPLIT_DEBUG) console.error('[dbg] 클러스터:', clusters.map((c) => `${Math.round(c.x0 / scale)}..${Math.round(c.x1 / scale)}(${c.area})`).join(' '));
   // 인물이 서로 닿아 한 덩어리로 묶였으면(배경 간격 없음) 세로 밀도가 가장 낮은
   // 지점에서 쪼갠다. 라벨 수만큼 덩어리가 생길 때까지 넓은 것부터 반복.
   const tight = (x0, x1, y0, y1) => {
@@ -121,6 +122,13 @@ async function refineRects(buf, meta, dets, bg) {
     const c = clusters.reduce((a, b) => (b.x1 - b.x0 > a.x1 - a.x0 ? b : a));
     const w = c.x1 - c.x0 + 1;
     if (w < 20) break;
+    // 다른 덩어리보다 유독 넓으면 여러 명이 겹친 것으로 본다. 밀도 계곡이 얕아도
+    // (팔·꼬리가 서로 겹친 시트) 최소 지점에서 쪼갠다.
+    const others = clusters.filter((x) => x !== c).map((x) => x.x1 - x.x0 + 1).sort((a, b) => a - b);
+    if (others.length && w < others[Math.floor(others.length / 2)] * 1.35) {
+      if (process.env.SPLIT_DEBUG) console.error(`[dbg] 분리 중단: 넓이 ${w}가 다른 덩어리와 비슷함`);
+      break;
+    }
     const prof = [];
     for (let x = c.x0; x <= c.x1; x++) {
       let n = 0;
@@ -130,7 +138,10 @@ async function refineRects(buf, meta, dets, bg) {
     const mean = prof.reduce((a, b) => a + b, 0) / w;
     let cut = -1, low = Infinity;
     for (let i = Math.floor(w * 0.2); i < Math.ceil(w * 0.8); i++) if (prof[i] < low) { low = prof[i]; cut = i; }
-    if (cut < 0 || low > mean * 0.35) break; // 뚜렷한 경계 없음 → 더 못 쪼갬
+    if (cut < 0 || low > mean * 0.8) {
+      if (process.env.SPLIT_DEBUG) console.error(`[dbg] 분리 실패: w=${w} cut=${cut} low=${low} mean=${Math.round(mean)}`);
+      break; // 계곡이 전혀 없음 → 더 못 쪼갬
+    }
     const parts = [tight(c.x0, c.x0 + cut - 1, c.y0, c.y1), tight(c.x0 + cut + 1, c.x1, c.y0, c.y1)].filter(Boolean);
     if (parts.length !== 2) break;
     clusters.splice(clusters.indexOf(c), 1, ...parts);
