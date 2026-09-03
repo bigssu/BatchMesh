@@ -10,13 +10,13 @@
       "glb",
       "fbx"
     ],
-    "image_enhancement": true,
+    "image_enhancement": false,
     "remove_lighting": true,
     "ultra_mode": false,
-    "target_polycount": null,
+    "target_polycount": 6000,
     "auto_size": false,
     "topology": "quad",
-    "model_type": "standard"
+    "model_type": "smart-topology"
   },
   "input": {
     "sheet_mode": "require_views",

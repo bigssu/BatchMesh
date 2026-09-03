@@ -546,6 +546,15 @@ setInterval(() => {
 function syncGenMode() {
   const smart = $('#genmode').value === 'smart-topology';
   document.querySelectorAll('.smart-only').forEach((el) => { el.style.display = smart ? '' : 'none'; });
+  // 스마트 토폴로지가 거부하는 옵션은 끄고 잠근다 (Meshy가 400으로 거절)
+  for (const k of ['image_enhancement', 'remove_lighting']) {
+    const el = document.querySelector(`[data-k="${k}"]`);
+    if (smart) { el.dataset.prev ??= el.checked ? '1' : ''; el.checked = false; }
+    else if (el.dataset.prev !== undefined) { el.checked = !!el.dataset.prev; delete el.dataset.prev; }
+    el.disabled = smart;
+    el.closest('label').style.opacity = smart ? 0.45 : 1;
+    el.closest('label').title = smart ? '스마트 토폴로지에서는 지원되지 않습니다' : '';
+  }
   $('#smartpolyv').textContent = Number($('#smartpoly').value).toLocaleString() + '면';
   $('#genmodenote').textContent = smart
     ? '정면 이미지 1장으로 게임용 클린 메시를 바로 생성합니다 (Meshy가 멀티뷰를 지원하지 않는 모드라 뒷면·측면은 추정됩니다). 추출 없이 이 면수가 최종입니다.'

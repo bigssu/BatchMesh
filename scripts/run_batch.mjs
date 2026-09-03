@@ -99,11 +99,10 @@ async function buildBody(p, dir) {
   for (const [k, v] of Object.entries(meshy)) if (v !== null) body[k] = v;
   if (!body.ultra_mode) delete body.ultra_mode; // Meshy가 파라미터를 비활성화한 기간엔 false여도 400 거부
   if (p.smart) {
-    // 스마트 토폴로지: meshy-t2 전용, 리메시 계열 파라미터는 쓰지 않는다 (면수는 target_polycount)
+    // 스마트 토폴로지: meshy-t2 전용. 리메시·이미지보정·조명제거는 이 모드가 거부한다.
     body.ai_model = 'meshy-t2';
     body.target_polycount = Math.min(15000, Math.max(100, meshy.target_polycount ?? 4000));
-    delete body.should_remesh;
-    delete body.topology;
+    for (const k of ['should_remesh', 'topology', 'image_enhancement', 'remove_lighting']) delete body[k];
   } else {
     delete body.model_type; // 표준 경로에는 없는 필드
   }
