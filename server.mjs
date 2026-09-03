@@ -292,6 +292,36 @@ async function cropUris(dir, names) {
   return imgs.map((i) => `data:${i.mime};base64,${i.buf.toString('base64')}`);
 }
 
+// --- API 키: .env에 저장하고 즉시 반영 (서버 재시작 불필요) ---
+const ENV_FILE = path.join(ROOT, '.env');
+const mask = (v) => (v ? `${v.slice(0, 4)}…${v.slice(-4)}` : null);
+const keyStatus = () => ({
+  meshy: mask(process.env.MESHY_API_KEY),
+  google: mask(process.env.GOOGLE_API_KEY),
+});
+function writeEnv(name, value) {
+  const lines = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf8').split(/\r?\n/) : [];
+  const i = lines.findIndex((l) => l.startsWith(`${name}=`));
+  if (i >= 0) lines[i] = `${name}=${value}`; else lines.push(`${name}=${value}`);
+  fs.writeFileSync(ENV_FILE, lines.filter(Boolean).join('\n') + '\n');
+}
+async function checkKeys() {
+  const out = { meshy: 'unset', google: 'unset' };
+  if (process.env.MESHY_API_KEY) {
+    try {
+      const r = await fetch(`${MESHY}/openapi/v1/image-to-3d?page_size=1`, { headers: { Authorization: `Bearer ${process.env.MESHY_API_KEY}` } });
+      out.meshy = r.ok ? 'ok' : `실패 (HTTP ${r.status})`;
+    } catch (e) { out.meshy = `연결 실패: ${e.message}`; }
+  }
+  if (process.env.GOOGLE_API_KEY) {
+    try {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': process.env.GOOGLE_API_KEY } });
+      out.google = r.ok ? 'ok' : `실패 (HTTP ${r.status})`;
+    } catch (e) { out.google = `연결 실패: ${e.message}`; }
+  }
+  return out;
+}
+
 // --- HTTP ---
 const readBody = (req) => new Promise((resolve, reject) => {
   let size = 0; const chunks = [];
@@ -339,6 +369,18 @@ http.createServer(async (req, res) => {
       return fs.createReadStream(abs).pipe(res);
     }
     if (p === '/api/root' && req.method === 'GET') return json(res, 200, { root: ROOT });
+    // --- API 키 설정 (각자 자기 키로 사용) ---
+    if (p === '/api/keys' && req.method === 'GET') return json(res, 200, keyStatus());
+    if (p === '/api/keys' && req.method === 'POST') {
+      const upd = JSON.parse(await readBody(req));
+      for (const [name, v] of Object.entries({ MESHY_API_KEY: upd.meshy, GOOGLE_API_KEY: upd.google })) {
+        if (typeof v !== 'string' || !v.trim()) continue;
+        process.env[name] = v.trim();
+        writeEnv(name, v.trim());
+      }
+      return json(res, 200, { ...keyStatus(), checked: await checkKeys() });
+    }
+    if (p === '/api/keys/check' && req.method === 'POST') return json(res, 200, await checkKeys());
     // 탐색기에서 해당 파일 위치 열기
     if (p === '/api/reveal' && req.method === 'POST') {
       const { rel } = JSON.parse(await readBody(req));
@@ -497,4 +539,8 @@ http.createServer(async (req, res) => {
   } catch (e) {
     json(res, 500, { error: e.message });
   }
-}).listen(PORT, () => console.log(`시트 검수 UI: http://localhost:${PORT}`));
+}).listen(PORT, '127.0.0.1', () => { // API 키를 다루므로 이 PC에서만 접속 허용
+  console.log(`시트 검수 UI: http://localhost:${PORT}`);
+  const s = keyStatus();
+  if (!s.meshy || !s.google) console.log('API 키가 없습니다 — 브라우저의 "API 키 설정"에서 입력하세요.');
+});

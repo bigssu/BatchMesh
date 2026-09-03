@@ -23,7 +23,7 @@ const { meshy, input: inputCfg, runner } = config;
 const BASE = 'https://api.meshy.ai';
 const API_KEY = process.env.MESHY_API_KEY;
 if (!API_KEY && !DRY_RUN) {
-  console.error('MESHY_API_KEY가 없습니다. .env 또는 환경변수로 설정하세요.');
+  console.error('Meshy API 키가 없습니다 — 화면 상단 "API 키 설정"에서 입력하세요.');
   process.exit(1);
 }
 

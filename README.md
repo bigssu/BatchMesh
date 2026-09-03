@@ -2,20 +2,29 @@
 
 캐릭터 시트(턴어라운드) 이미지를 넣으면 뷰를 자동 분해하고, 검수 후 Meshy API로 3D 모델을 생성하는 로컬 웹 도구.
 
-## 준비
+## 시작하기
+
+필요한 것: **Node.js 20.6 이상**, 그리고 본인 계정의 API 키 2개.
 
 ```
+git clone https://github.com/bigssu/BatchMesh.git
+cd BatchMesh
 npm install
+npm start           →  http://localhost:3838
 ```
 
-- `.env`에 `MESHY_API_KEY=msy_...` (`.env.example` 참고)
-- 환경변수 `GOOGLE_API_KEY` — 시트 자동 분해(Gemini 비전) 및 2K 업스케일용
+브라우저가 열리면 상단 **"API 키 설정"**에 각자 키를 넣고 "키 저장" → "연결 확인":
+
+| 키 | 발급처 | 용도 |
+|---|---|---|
+| Meshy API 키 (`msy_…`) | [meshy.ai](https://www.meshy.ai) → Settings → API | 3D 생성·리메시·텍스처 |
+| Google AI 키 (`AIza…`) | [aistudio.google.com](https://aistudio.google.com) → Get API key | 시트 자동 분해, 이미지 업스케일 |
+
+키는 프로젝트 폴더의 `.env`에만 저장되고 외부로 전송되지 않습니다. 서버는 `127.0.0.1`에만 바인딩되어 같은 PC에서만 접속됩니다. 여러 사람이 쓰려면 각자 자기 PC에서 실행하고 자기 키를 넣으면 됩니다.
+
+Google 키 없이도 **뷰 이미지를 직접 업로드**하면 3D 생성은 가능합니다(자동 분해·업스케일만 비활성).
 
 ## 사용
-
-```
-node server.mjs      →  http://localhost:3838
-```
 
 1. **시트 드래그** → front/left/back/right/face 자동 크롭 (전신 1장만 넣으면 싱글 이미지 모드)
 2. **검수** — 크롭별 삭제(✕) / 2K 업스케일 / 힌트 재분해, 이미지 위 📂 폴더 열기·📋 경로 복사

@@ -273,7 +273,7 @@ export async function upscale(file, { short, long }) {
   const factor = short ? short / curShort : long / curLong;
   if (factor <= 1) return null; // 이미 충분함
   const key = process.env.GOOGLE_API_KEY;
-  if (!key) throw new Error('GOOGLE_API_KEY 환경변수 없음');
+  if (!key) throw new Error('Google AI 키가 없습니다 — 화면 상단 "API 키 설정"에서 입력하세요.');
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent`, {
     method: 'POST',
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
@@ -368,7 +368,7 @@ export async function cleanCrop(file, bg) {
 
 export async function splitSheet(sheetPath, outDir, hint = '') {
   const key = process.env.GOOGLE_API_KEY;
-  if (!key) throw new Error('GOOGLE_API_KEY 환경변수가 없습니다.');
+  if (!key) throw new Error('Google AI 키가 없습니다 — 화면 상단 "API 키 설정"에서 입력하세요.');
   const buf = fs.readFileSync(sheetPath);
   const meta = await sharp(buf).metadata();
 

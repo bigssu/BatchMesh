@@ -1,10 +1,10 @@
 {
-  "name": "meshyapi",
+  "name": "batchmesh",
   "version": "1.0.0",
-  "description": "1. `.env`에 `MESHY_API_KEY=msy_...` 설정 (`.env.example` 참고) 2. 시트를 `input/<캐릭터id>/`에 배치 3. (권장) `front.png` / `left.png` / `back.png` / `right.png`로 크롭 (얼굴 컷은 `face.png`) 4. `node scripts/run_batch.mjs` (`--dry-run`으로 매칭 확인, `--only id1,id2`, `--force`)",
+  "description": "캐릭터 시트를 분해·검수해 Meshy API로 3D 모델을 만드는 로컬 웹 도구",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.mjs"
   },
   "keywords": [],
   "author": "",
@@ -13,5 +13,8 @@
   "dependencies": {
     "sharp": "^0.35.4",
     "three": "^0.185.1"
+  },
+  "engines": {
+    "node": ">=20.6"
   }
 }
