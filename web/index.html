@@ -28,7 +28,11 @@
   .imgs figcaption { font-size:12px; color:var(--dim); margin-top:4px; }
   .sheet-thumb img { max-height:180px; opacity:.75; }
   .btns { display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap; }
-  button { background:var(--line); color:var(--fg); border:0; border-radius:6px; padding:6px 14px; cursor:pointer; font:inherit; }
+  button { background:var(--line); color:var(--fg); border:0; border-radius:6px; padding:6px 14px; cursor:pointer; font:inherit;
+    display:inline-flex; align-items:center; gap:5px; vertical-align:middle; }
+  button svg { display:block; }
+  a svg, .x svg { display:inline-block; vertical-align:-2px; }
+  figcaption a { text-decoration:none; }
   button:hover { filter:brightness(1.2); }
   button.ok { background:var(--ok); color:#08130c; }
   button.danger { background:var(--err); color:#fff; }
@@ -132,8 +136,8 @@
   </div>
 </details>
 <div id="runbar">
-  <button id="runbtn" class="acc">승인된 시트 3D 생성 시작</button>
-  <button id="texbtn">모두 텍스처 입히기</button>
+  <button id="runbtn" class="acc" title="승인된 시트를 모두 3D로 생성">3D 생성</button>
+  <button id="texbtn" title="기하만 있는 버전에 모두 텍스처 생성">텍스처</button>
   <span id="runstat" style="color:var(--dim)"></span>
 </div>
 <div id="log"></div>
@@ -145,6 +149,25 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+
+// 인라인 아이콘 (Lucide, MIT) — 의존성 없이 필요한 것만 경로로 보관
+const ICONS = {
+  check: 'M20 6 9 17l-5-5',
+  refresh: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5',
+  trash: 'M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
+  archive: 'M4 8v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M2 3h20v5H2zM10 12h4',
+  cube: 'M12 2 3 7v10l9 5 9-5V7ZM3 7l9 5 9-5M12 12v10',
+  layers: 'm7 6 5 5 5-5M7 13l5 5 5-5',
+  paint: 'M12 2.69 6.34 8.34a8 8 0 1 0 11.32 0z',
+  upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
+  expand: 'M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3',
+  folder: 'M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z',
+  copy: 'M9 9h10v10H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+  close: 'M18 6 6 18M6 6l12 12',
+  up: 'M12 19V5M5 12l7-7 7 7',
+};
+const ico = (n, size = 15) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[n]}"/></svg>`;
 const api = async (url, opt) => {
   const r = await fetch(url, opt);
   const j = await r.json().catch(() => ({}));
@@ -177,14 +200,12 @@ async function refresh() {
   }
   pendingRun = sheets.filter((s) => s.status === 'approved' && !s.done).map((s) => s.id);
   $('#runbtn').disabled = st.running || !pendingRun.length;
-  $('#runbtn').textContent = pendingRun.length
-    ? `승인된 시트 ${pendingRun.length}개 3D 생성 시작`
-    : '승인된 시트 3D 생성 시작';
+  $('#runbtn').innerHTML = `${ico('cube')} 3D 생성${pendingRun.length ? ` (${pendingRun.length})` : ''}`;
   $('#runstat').textContent = st.running ? `배치 실행 중 (${st.ids.join(', ')})` : '';
   // 텍스처 없는(기하만) 버전 모으기
   pendingTex = sheets.flatMap((s) => (s.gens ?? []).filter((g) => g.geomOnly).map((g) => s.id));
   $('#texbtn').disabled = !pendingTex.length;
-  $('#texbtn').textContent = pendingTex.length ? `모두 텍스처 입히기 (${pendingTex.length}개)` : '모두 텍스처 입히기';
+  $('#texbtn').innerHTML = `${ico('paint')} 텍스처${pendingTex.length ? ` (${pendingTex.length})` : ''}`;
   const log = $('#log');
   if (st.lines.length) {
     log.style.display = 'block';
@@ -225,8 +246,8 @@ function renderCards(sheets) {
 
 // 호버 아이콘 바 (📂 폴더 열기 / 📋 경로 복사) — 이미지·소형 뷰어 공용
 const ibarHtml = (rel, what) => `<div class="ibar">
-    <button class="ib" data-open="${rel}" title="${what} 폴더 열기">📂</button>
-    <button class="ib" data-copy="${rel}" title="${what} 경로 복사">📋</button></div>`;
+    <button class="ib" data-open="${rel}" title="${what} 폴더 열기">${ico('folder', 14)}</button>
+    <button class="ib" data-copy="${rel}" title="${what} 경로 복사">${ico('copy', 14)}</button></div>`;
 
 function figHtml(rel, bust, cap, cls = '') {
   return `<figure class="imgwrap ${cls}">${ibarHtml(rel, '이미지')}
@@ -261,12 +282,12 @@ function mini3dHtml(viewerUrl, modelRel, capHtml) {
 function genHtml(baseRel, g, idx, actions) {
   const dl = g.formats.map((f) => `<a href="/files/${baseRel}/model.${f}">${f.toUpperCase()}</a>`).join(' · ');
   const viewerUrl = `/viewer?glb=${encodeURIComponent(baseRel + '/model.glb')}&v=${g.finished ?? 0}`;
-  const del = actions ? ` · <button class="x" data-gen="${g.name}" data-idx="${idx}">삭제</button>` : '';
+  const del = actions ? ` · <button class="x" data-gen="${g.name}" data-idx="${idx}" title="이 버전 영구 삭제">${ico('trash', 13)}</button>` : '';
   // 하이폴리 원본만 추출 가능 — 추출본을 다시 깎으면 품질 저하
   const extract = actions && !g.derived
     ? `<div class="extract"><input type="number" data-pc="${g.name}" value="12000" min="100" max="300000" step="100" title="추출 폴리곤 수">
-       <button data-remesh="${g.name}" title="이 하이폴리에서 로우폴리 추출 (반복 가능)">로우폴리 추출</button>
-       ${g.geomOnly ? `<button class="acc" data-retex="${g.name}" title="시트 이미지를 가이드로 이 기하에 텍스처 생성 (~10크레딧)">텍스처 입히기</button>` : ''}</div>`
+       <button data-remesh="${g.name}" title="이 하이폴리에서 로우폴리 추출 (반복 가능)">${ico('layers')} 추출</button>
+       ${g.geomOnly ? `<button class="acc" data-retex="${g.name}" title="시트 이미지를 가이드로 이 기하에 텍스처 생성 (~10크레딧)">${ico('paint')} 텍스처</button>` : ''}</div>`
     : '';
   const tag = [
     g.derived && ` <span class="badge">추출본${g.polycount ? ' ' + g.polycount.toLocaleString() + '면' : ''}</span>`,
@@ -276,7 +297,7 @@ function genHtml(baseRel, g, idx, actions) {
   const el = g.elapsed != null
     ? ` · 소요 ${g.elapsed >= 60 ? Math.floor(g.elapsed / 60) + '분 ' + (g.elapsed % 60) + '초' : g.elapsed + '초'}`
     : '';
-  const cap = `<b>#${idx}</b>${tag} · <a href="${viewerUrl}" target="_blank" title="독립 뷰어로 크게 보기">⛶ 크게</a> · ${dl}${del}
+  const cap = `<b>#${idx}</b>${tag} · <a href="${viewerUrl}" target="_blank" title="독립 뷰어로 크게 보기">${ico('expand', 13)}</a> · ${dl}${del}
     ${g.finished ? `<div class="gentime">생성 ${dtfmt(g.finished)}${el}</div>` : ''}${extract}`;
   return g.formats.includes('glb') ? mini3dHtml(viewerUrl, `${baseRel}/model.glb`, cap) : `<figure><figcaption>${cap}</figcaption></figure>`;
 }
@@ -288,8 +309,8 @@ function buildCard(s) {
     // 5개 뷰 슬롯: 있으면 이미지, 없으면 업로드 자리
     const crops = ['front', 'left', 'back', 'right', 'face'].map((v) => s.views.includes(v)
       ? figHtml(`staging/${s.id}/${v}.png`, bust,
-        `${v} <button class="x" data-upload="${v}" title="다른 이미지로 교체">교체</button> <button class="x" data-upscale="${v}" title="GCP 업스케일로 긴 변 2048px화">2K</button> <button class="x" data-view="${v}" title="이 크롭만 삭제">✕</button>`)
-      : `<figure><div class="slot" data-upload="${v}" title="클릭해서 ${v} 이미지 업로드">＋<br>${v}</div><figcaption>${v} 없음</figcaption></figure>`).join('');
+        `${v} <button class="x" data-upload="${v}" title="다른 이미지로 교체">${ico('upload', 13)}</button> <button class="x" data-upscale="${v}" title="업스케일 (긴 변 2048px)">2K</button> <button class="x" data-view="${v}" title="이 크롭만 삭제">${ico('close', 13)}</button>`)
+      : `<figure><div class="slot" data-upload="${v}" title="클릭해서 ${v} 이미지 업로드">${ico('up', 22)}<br>${v}</div><figcaption>${v} 없음</figcaption></figure>`).join('');
     const result = (s.gens ?? []).map((g, i) => genHtml(`output/${s.id}/${g.name}`, g, i + 1, true)).join('');
     // 진행 중 작업 자리표시 카드: 추출/텍스처(실제 진행률) / 생성·분해(무한 바)
     const procs = (s.jobs ?? []).map((j) => procHtml(
@@ -318,12 +339,12 @@ function buildCard(s) {
         ${crops}${result}${procs}
       </div>
       <div class="btns">
-        <button class="ok" data-act="approve" ${s.status !== 'review' || busy.has(s.id) ? 'disabled' : ''}>승인</button>
-        ${s.status === 'approved' && !s.done ? '<button class="acc" data-act="runone">이 시트만 3D 생성</button>' : ''}
-        ${s.done ? '<button class="acc" data-act="regen">3D 재생성</button><button data-act="archive">히스토리 보관</button>' : ''}
+        <button class="ok" data-act="approve" title="승인" ${s.status !== 'review' || busy.has(s.id) ? 'disabled' : ''}>${ico('check')} 승인</button>
+        ${s.status === 'approved' && !s.done ? `<button class="acc" data-act="runone" title="이 시트만 3D 생성">${ico('cube')} 생성</button>` : ''}
+        ${s.done ? `<button class="acc" data-act="regen" title="현재 옵션으로 다시 생성">${ico('refresh')} 재생성</button><button data-act="archive" title="히스토리로 보관">${ico('archive')}</button>` : ''}
         <input type="text" placeholder="재생성 힌트 (예: 왼쪽/오른쪽이 바뀜)" data-hint>
-        <button data-act="resplit" ${busy.has(s.id) ? 'disabled' : ''}>재생성</button>
-        <button class="danger" data-act="delete">삭제</button>
+        <button data-act="resplit" title="시트를 다시 분해" ${busy.has(s.id) ? 'disabled' : ''}>${ico('refresh')} 분해</button>
+        <button class="danger" data-act="delete" title="이 카드 삭제">${ico('trash')}</button>
       </div>`;
     c.querySelectorAll('button[data-act]').forEach((b) => b.onclick = () => act(s.id, b.dataset.act, c));
     c.querySelectorAll('[data-upload]').forEach((el) => el.onclick = () => pickView(s.id, el.dataset.upload));
