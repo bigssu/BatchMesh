@@ -12,7 +12,7 @@
     ],
     "image_enhancement": false,
     "remove_lighting": false,
-    "ultra_mode": true,
+    "ultra_mode": false,
     "target_polycount": 4000,
     "auto_size": false,
     "topology": "quad",
@@ -60,6 +60,6 @@
     ],
     "save_preview": true,
     "skip_existing": true,
-    "geometry_first": true
+    "geometry_first": false
   }
 }
