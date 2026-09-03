@@ -105,7 +105,14 @@
   <div class="optgrid">
     <label>AI 모델
       <select data-k="ai_model"><option>latest</option><option>meshy-6</option></select></label>
-    <label class="wide" style="color:var(--dim)">생성은 항상 <b>하이폴리</b>로 진행 — 로우폴리는 완성된 버전의 "로우폴리 추출"로 뽑습니다 (같은 하이폴리에서 폴리곤 수 바꿔 반복 추출 가능)</label>
+    <label>생성 방식
+      <select id="genmode">
+        <option value="standard">표준 (멀티뷰 하이폴리)</option>
+        <option value="smart-topology">스마트 토폴로지 (정면 1장)</option>
+      </select></label>
+    <label class="wide smart-only">면수
+      <input type="range" id="smartpoly" min="100" max="15000" step="100"> <b id="smartpolyv"></b></label>
+    <label class="wide" id="genmodenote" style="color:var(--dim);font-size:13px"></label>
     <label>포맷
       <input type="checkbox" id="fmt-glb"> GLB
       <input type="checkbox" id="fmt-fbx"> FBX</label>
@@ -459,6 +466,9 @@ async function loadOpts() {
   }
   const aiSel = document.querySelector('[data-k="ai_model"]');
   if (!aiSel.value) aiSel.value = 'latest';
+  $('#genmode').value = m.model_type === 'smart-topology' ? 'smart-topology' : 'standard';
+  $('#smartpoly').value = Math.min(15000, Math.max(100, m.target_polycount ?? 4000));
+  syncGenMode();
   const fmts = m.target_formats ?? ['glb'];
   $('#fmt-glb').checked = fmts.includes('glb');
   $('#fmt-fbx').checked = fmts.includes('fbx');
@@ -469,8 +479,10 @@ $('#saveopts').onclick = async () => {
   const m = {};
   for (const el of document.querySelectorAll('[data-k]'))
     m[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value;
-  m.should_remesh = false; // 생성은 항상 하이폴리
-  m.target_polycount = null;
+  const smart = $('#genmode').value === 'smart-topology';
+  m.model_type = smart ? 'smart-topology' : 'standard';
+  m.should_remesh = false; // 표준 경로의 생성은 항상 하이폴리 (로우폴리는 추출로)
+  m.target_polycount = smart ? Number($('#smartpoly').value) : null;
   m.geometry_first = $('#geo-first').checked;
   const fmts = [];
   if ($('#fmt-glb').checked) fmts.push('glb');
@@ -530,6 +542,17 @@ setInterval(() => {
     el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   }
 }, 1000);
+
+function syncGenMode() {
+  const smart = $('#genmode').value === 'smart-topology';
+  document.querySelectorAll('.smart-only').forEach((el) => { el.style.display = smart ? '' : 'none'; });
+  $('#smartpolyv').textContent = Number($('#smartpoly').value).toLocaleString() + '면';
+  $('#genmodenote').textContent = smart
+    ? '정면 이미지 1장으로 게임용 클린 메시를 바로 생성합니다 (Meshy가 멀티뷰를 지원하지 않는 모드라 뒷면·측면은 추정됩니다). 추출 없이 이 면수가 최종입니다.'
+    : '멀티뷰로 하이폴리를 생성합니다. 로우폴리는 완성된 버전의 "로우폴리 추출"로 뽑습니다 (같은 하이폴리에서 면수를 바꿔 반복 추출 가능).';
+}
+$('#genmode').onchange = syncGenMode;
+$('#smartpoly').oninput = syncGenMode;
 
 // --- API 키 설정 ---
 async function loadKeys() {

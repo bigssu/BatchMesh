@@ -56,6 +56,13 @@ function matchFiles(dir) {
 function plan(dir) {
   const { views, faces, sheet } = matchFiles(dir);
   const ordered = VIEW_ORDER.filter((v) => views[v]).map((v) => views[v]);
+  // 스마트 토폴로지는 단일 이미지 엔드포인트에서만 지원 → 정면 1장으로 간다
+  if (meshy.model_type === 'smart-topology') {
+    const primary = views.front ?? ordered[0] ?? (sheet && inputCfg.sheet_mode === 'whole_sheet' ? sheet : null);
+    return primary
+      ? { endpoint: 'image-to-3d', geometry: [primary], views, faces, sheet, smart: true }
+      : { fail: '스마트 토폴로지는 정면(front) 이미지가 필요함', views, faces, sheet };
+  }
   if (ordered.length >= 2) {
     if (!views.front) return { fail: 'multi-view인데 front(primary) 뷰가 없음', views, faces, sheet };
     return { endpoint: 'multi-image-to-3d', geometry: ordered, views, faces, sheet };
@@ -91,6 +98,15 @@ async function buildBody(p, dir) {
   const body = {};
   for (const [k, v] of Object.entries(meshy)) if (v !== null) body[k] = v;
   if (!body.ultra_mode) delete body.ultra_mode; // Meshy가 파라미터를 비활성화한 기간엔 false여도 400 거부
+  if (p.smart) {
+    // 스마트 토폴로지: meshy-t2 전용, 리메시 계열 파라미터는 쓰지 않는다 (면수는 target_polycount)
+    body.ai_model = 'meshy-t2';
+    body.target_polycount = Math.min(15000, Math.max(100, meshy.target_polycount ?? 4000));
+    delete body.should_remesh;
+    delete body.topology;
+  } else {
+    delete body.model_type; // 표준 경로에는 없는 필드
+  }
   if (runner.geometry_first) {
     // 기하 먼저 검수 모드: 텍스처 없이 생성, 승인 후 UI의 "텍스처 입히기"(Retexture)로 진행
     body.should_texture = false;
@@ -98,7 +114,7 @@ async function buildBody(p, dir) {
     delete body.texture_resolution;
   }
   const useFace = inputCfg.use_face_as_texture_guide && p.faces.length && body.should_texture &&
-    ['latest', 'meshy-7'].includes(body.ai_model);
+    ['latest', 'meshy-7'].includes(body.ai_model); // 얼굴 텍스처 가이드는 meshy-7/latest 전용
   const geo = await Promise.all(p.geometry.map((f) => prepareImage(path.join(dir, f))));
   const faces = useFace ? await Promise.all(p.faces.map((f) => prepareImage(path.join(dir, f)))) : [];
   // 전체 페이로드가 20MB 넘으면 PNG 전부 JPG로 전환 (Meshy 업로드 한도 대비)
