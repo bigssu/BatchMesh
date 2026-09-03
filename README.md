@@ -4,14 +4,16 @@
 
 ## 시작하기
 
-필요한 것: **Node.js 20.6 이상**, 그리고 본인 계정의 API 키 2개.
+**팀원 각자 자기 PC에서 실행하는 도구입니다.** 서버를 공유하지 않으므로 API 키도, 올린 시트도, 만들어진 모델도 전부 본인 PC에만 남습니다.
+
+필요한 것: **Node.js 20.6 이상** ([nodejs.org](https://nodejs.org) LTS), 본인 계정의 API 키 2개.
 
 ```
 git clone https://github.com/bigssu/BatchMesh.git
-cd BatchMesh
-npm install
-npm start           →  http://localhost:3838
 ```
+받은 폴더에서 **`start.bat` 더블클릭** (macOS·Linux는 `./start.sh`). 처음 한 번은 라이브러리를 자동 설치하고, 끝나면 브라우저가 열립니다.
+
+개발자라면 `npm install && npm start`도 동일합니다.
 
 브라우저가 열리면 상단 **"API 키 설정"**에 각자 키를 넣고 "키 저장" → "연결 확인":
 

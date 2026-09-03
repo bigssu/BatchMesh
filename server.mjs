@@ -549,8 +549,17 @@ http.createServer(async (req, res) => {
   } catch (e) {
     json(res, 500, { error: e.message });
   }
+}).on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\n  포트 ${PORT}이 이미 사용 중입니다.`);
+    console.error('  BatchMesh가 이미 실행 중이면 http://localhost:3838 을 여세요.');
+    console.error('  아니라면 그 프로그램을 끄고 다시 실행하세요.\n');
+  } else console.error(`\n  서버를 시작할 수 없습니다: ${e.message}\n`);
+  process.exit(1);
 }).listen(PORT, '127.0.0.1', () => { // API 키를 다루므로 이 PC에서만 접속 허용
-  console.log(`시트 검수 UI: http://localhost:${PORT}`);
+  console.log(`\n  BatchMesh — http://localhost:${PORT}`);
   const s = keyStatus();
-  if (!s.meshy || !s.google) console.log('API 키가 없습니다 — 브라우저의 "API 키 설정"에서 입력하세요.');
+  console.log(s.meshy && s.google
+    ? '  API 키 확인됨. 브라우저에서 시트를 올리면 됩니다.\n'
+    : '  API 키가 아직 없습니다 — 브라우저 상단 "API 키 설정"에서 각자 본인 키를 입력하세요.\n');
 });
