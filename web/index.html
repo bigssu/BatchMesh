@@ -126,6 +126,7 @@
 </details>
 <div id="runbar">
   <button id="runbtn" class="acc">승인된 시트 3D 생성 시작</button>
+  <button id="texbtn">모두 텍스처 입히기</button>
   <span id="runstat" style="color:var(--dim)"></span>
 </div>
 <div id="log"></div>
@@ -173,6 +174,10 @@ async function refresh() {
     ? `승인된 시트 ${pendingRun.length}개 3D 생성 시작`
     : '승인된 시트 3D 생성 시작';
   $('#runstat').textContent = st.running ? `배치 실행 중 (${st.ids.join(', ')})` : '';
+  // 텍스처 없는(기하만) 버전 모으기
+  pendingTex = sheets.flatMap((s) => (s.gens ?? []).filter((g) => g.geomOnly).map((g) => s.id));
+  $('#texbtn').disabled = !pendingTex.length;
+  $('#texbtn').textContent = pendingTex.length ? `모두 텍스처 입히기 (${pendingTex.length}개)` : '모두 텍스처 입히기';
   const log = $('#log');
   if (st.lines.length) {
     log.style.display = 'block';
@@ -428,7 +433,14 @@ $('#file').onchange = (e) => upload([...e.target.files]);
 $('#drop').ondragover = (e) => { e.preventDefault(); $('#drop').classList.add('over'); };
 $('#drop').ondragleave = () => $('#drop').classList.remove('over');
 $('#drop').ondrop = (e) => { e.preventDefault(); $('#drop').classList.remove('over'); upload([...e.dataTransfer.files]); };
-let pendingRun = [], CONCURRENCY = 6;
+let pendingRun = [], pendingTex = [], CONCURRENCY = 6;
+$('#texbtn').onclick = async () => {
+  if (!pendingTex.length) return alert('텍스처를 입힐 기하 버전이 없습니다.');
+  const names = [...new Set(pendingTex)];
+  if (!confirm(`기하만 있는 ${pendingTex.length}개 버전에 텍스처를 생성합니다 (동시 ${CONCURRENCY}개씩).\n\n${names.join('\n')}\n\n예상 크레딧 약 ${pendingTex.length * 10}. 진행할까요?`)) return;
+  try { await api('/api/texture-all', { method: 'POST' }); } catch (e) { alert(e.message); }
+  refresh();
+};
 $('#runbtn').onclick = async () => {
   if (!pendingRun.length) return alert('승인된 시트가 없습니다. 카드에서 "승인"을 먼저 누르세요.');
   const cost = pendingRun.length * ($('#geo-first').checked ? 20 : 30);

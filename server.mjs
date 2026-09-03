@@ -523,6 +523,16 @@ http.createServer(async (req, res) => {
       }
       if (action === 'approve' && req.method === 'POST') { approve(id); return json(res, 200, { ok: true }); }
     }
+    // 기하만 있는 버전 전부에 텍스처 입히기 (동시 실행 수 제한)
+    if (p === '/api/texture-all' && req.method === 'POST') {
+      const targets = [];
+      for (const s of listSheets()) for (const g of s.gens) if (g.geomOnly) targets.push({ id: s.id, gen: g.name });
+      const limit = readConfig().runner.concurrency ?? 6;
+      const queue = [...targets];
+      const worker = async () => { while (queue.length) { const t = queue.shift(); await retextureJob(t.id, t.gen); } };
+      Promise.all(Array.from({ length: Math.min(limit, queue.length) }, worker)); // 백그라운드
+      return json(res, 200, { count: targets.length, targets });
+    }
     if (p === '/api/run' && req.method === 'POST') {
       let body = {};
       try { body = JSON.parse((await readBody(req)).toString() || '{}'); } catch {}
