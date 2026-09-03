@@ -408,7 +408,7 @@ http.createServer(async (req, res) => {
     // 생성 옵션 (config.json의 meshy 블록) 조회/수정 — 다음 배치부터 적용
     if (p === '/api/config' && req.method === 'GET') {
       const cfg = readConfig();
-      return json(res, 200, { ...cfg.meshy, geometry_first: cfg.runner.geometry_first ?? false });
+      return json(res, 200, { ...cfg.meshy, geometry_first: cfg.runner.geometry_first ?? false, concurrency: cfg.runner.concurrency ?? 6 });
     }
     if (p === '/api/config' && req.method === 'POST') {
       const upd = JSON.parse(await readBody(req));

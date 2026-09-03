@@ -167,7 +167,11 @@ async function refresh() {
     const bar = document.querySelector(`[data-jobbar="${CSS.escape(k)}"]`);
     if (bar) bar.style.width = `${j.progress ?? 0}%`;
   }
-  $('#runbtn').disabled = st.running;
+  pendingRun = sheets.filter((s) => s.status === 'approved' && !s.done).map((s) => s.id);
+  $('#runbtn').disabled = st.running || !pendingRun.length;
+  $('#runbtn').textContent = pendingRun.length
+    ? `승인된 시트 ${pendingRun.length}개 3D 생성 시작`
+    : '승인된 시트 3D 생성 시작';
   $('#runstat').textContent = st.running ? `배치 실행 중 (${st.ids.join(', ')})` : '';
   const log = $('#log');
   if (st.lines.length) {
@@ -303,6 +307,7 @@ function buildCard(s) {
       </div>
       <div class="btns">
         <button class="ok" data-act="approve" ${s.status !== 'review' || busy.has(s.id) ? 'disabled' : ''}>승인</button>
+        ${s.status === 'approved' && !s.done ? '<button class="acc" data-act="runone">이 시트만 3D 생성</button>' : ''}
         ${s.done ? '<button class="acc" data-act="regen">3D 재생성</button><button data-act="archive">히스토리 보관</button>' : ''}
         <input type="text" placeholder="재생성 힌트 (예: 왼쪽/오른쪽이 바뀜)" data-hint>
         <button data-act="resplit" ${busy.has(s.id) ? 'disabled' : ''}>재생성</button>
@@ -346,6 +351,9 @@ async function act(id, action, card) {
       await api(`/api/sheets/${id}`, { method: 'DELETE' });
     } else if (action === 'approve') {
       await api(`/api/sheets/${id}/approve`, { method: 'POST' });
+    } else if (action === 'runone') {
+      if (!confirm(`${id} 하나만 3D로 생성할까요? 크레딧이 소모됩니다.`)) return;
+      await api('/api/run', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
     } else if (action === 'regen') {
       if (!confirm(`${id}를 현재 옵션으로 다시 생성할까요? 크레딧이 소모됩니다.`)) return;
       await api('/api/run', { method: 'POST', body: JSON.stringify({ ids: [id], force: true }) });
@@ -420,7 +428,14 @@ $('#file').onchange = (e) => upload([...e.target.files]);
 $('#drop').ondragover = (e) => { e.preventDefault(); $('#drop').classList.add('over'); };
 $('#drop').ondragleave = () => $('#drop').classList.remove('over');
 $('#drop').ondrop = (e) => { e.preventDefault(); $('#drop').classList.remove('over'); upload([...e.dataTransfer.files]); };
-$('#runbtn').onclick = async () => { try { await api('/api/run', { method: 'POST' }); } catch (e) { alert(e.message); } refresh(); };
+let pendingRun = [], CONCURRENCY = 6;
+$('#runbtn').onclick = async () => {
+  if (!pendingRun.length) return alert('승인된 시트가 없습니다. 카드에서 "승인"을 먼저 누르세요.');
+  const cost = pendingRun.length * ($('#geo-first').checked ? 20 : 30);
+  if (!confirm(`승인된 시트 ${pendingRun.length}개를 모두 3D로 생성합니다 (동시 ${CONCURRENCY}개씩).\n\n${pendingRun.join('\n')}\n\n예상 크레딧 약 ${cost}. 진행할까요?`)) return;
+  try { await api('/api/run', { method: 'POST' }); } catch (e) { alert(e.message); }
+  refresh();
+};
 
 // --- 생성 옵션 패널 --- (생성은 항상 하이폴리, 로우폴리는 버전별 추출)
 async function loadOpts() {
@@ -436,6 +451,7 @@ async function loadOpts() {
   $('#fmt-glb').checked = fmts.includes('glb');
   $('#fmt-fbx').checked = fmts.includes('fbx');
   $('#geo-first').checked = !!m.geometry_first;
+  CONCURRENCY = m.concurrency ?? 6;
 }
 $('#saveopts').onclick = async () => {
   const m = {};
