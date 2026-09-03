@@ -102,11 +102,12 @@ async function buildBody(p, dir) {
     // 스마트 토폴로지: meshy-t2 전용. 리메시·이미지보정·조명제거는 이 모드가 거부한다.
     body.ai_model = 'meshy-t2';
     body.target_polycount = Math.min(15000, Math.max(100, meshy.target_polycount ?? 4000));
-    for (const k of ['should_remesh', 'topology', 'image_enhancement', 'remove_lighting']) delete body[k];
+    for (const k of ['should_remesh', 'topology', 'image_enhancement', 'remove_lighting', 'ultra_mode']) delete body[k];
   } else {
     delete body.model_type; // 표준 경로에는 없는 필드
   }
-  if (runner.geometry_first) {
+  // 스마트 토폴로지는 추출 단계가 없어 한 번에 텍스처까지 만든다 (기하-먼저 모드 무시)
+  if (runner.geometry_first && meshy.model_type !== 'smart-topology') {
     // 기하 먼저 검수 모드: 텍스처 없이 생성, 승인 후 UI의 "텍스처 입히기"(Retexture)로 진행
     body.should_texture = false;
     delete body.enable_pbr;

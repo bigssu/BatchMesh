@@ -11,9 +11,9 @@
       "fbx"
     ],
     "image_enhancement": false,
-    "remove_lighting": true,
-    "ultra_mode": false,
-    "target_polycount": 6000,
+    "remove_lighting": false,
+    "ultra_mode": true,
+    "target_polycount": 4000,
     "auto_size": false,
     "topology": "quad",
     "model_type": "smart-topology"
